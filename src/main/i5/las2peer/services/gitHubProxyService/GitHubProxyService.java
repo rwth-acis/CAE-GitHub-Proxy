@@ -3,29 +3,44 @@ package i5.las2peer.services.gitHubProxyService;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.util.Base64;
+import java.util.Iterator;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.MergeCommand;
+import org.eclipse.jgit.api.MergeResult;
+import org.eclipse.jgit.api.PushCommand;
+import org.eclipse.jgit.api.errors.CheckoutConflictException;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.api.errors.InvalidRefNameException;
 import org.eclipse.jgit.api.errors.InvalidRemoteException;
+import org.eclipse.jgit.api.errors.RefAlreadyExistsException;
+import org.eclipse.jgit.api.errors.RefNotFoundException;
 import org.eclipse.jgit.api.errors.TransportException;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
 import org.eclipse.jgit.lib.ObjectReader;
+import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.revwalk.RevTree;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.PushResult;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.PathFilter;
 import org.json.simple.JSONArray;
@@ -232,10 +247,78 @@ public class GitHubProxyService extends Service {
     return repository;
   }
 
+  public void switchBranch(String branchName, Git git)
+      throws IOException, RefAlreadyExistsException, RefNotFoundException, InvalidRefNameException,
+      CheckoutConflictException, GitAPIException {
+    boolean branchExists = git.getRepository().getRef(branchName) != null;
+    if (!branchExists) {
+      git.branchCreate().setName(branchName).call();
+    }
+    git.checkout().setName(branchName).call();
+  }
+
+  @PUT
+  @Path("{repositoryName}/push/")
+  @Produces(MediaType.TEXT_PLAIN)
+  @ApiOperation(value = "Push the commits to the remote repo.",
+      notes = "Push the commits to the remote repo.")
+  @ApiResponses(value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, file found"),
+      @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR,
+          message = "Internal server error")})
+  public HttpResponse pushToRemote(@PathParam("repositoryName") String repositoryName) {
+    try {
+      // TODO: implement lock during the pushing
+      boolean isFrontend = repositoryName.startsWith("frontendComponent-");
+      String masterBranchName = isFrontend ? "gh-pages" : "master";
+
+      Repository repository = this.getRepository(repositoryName);
+
+      try (Git git = new Git(repository)) {
+        this.switchBranch(masterBranchName, git);
+        // TODO: check fetch and pull results
+        git.fetch().call();
+        git.pull().call();
+
+        MergeCommand mCmd = git.merge();
+        Ref HEAD = repository.getRef("refs/heads/development");
+        mCmd.include(HEAD);
+        mCmd.setStrategy(MergeStrategy.THEIRS);
+        MergeResult mRes = mCmd.call();
+
+        if (mRes.getMergeStatus().isSuccessful()) {
+          CredentialsProvider cp =
+              new UsernamePasswordCredentialsProvider(gitHubUser, gitHubPassword);
+
+          PushCommand pushCmd = git.push();
+          pushCmd.setCredentialsProvider(cp).setForce(true).setPushAll();
+          Iterator<PushResult> it = pushCmd.call().iterator();
+          while (it.hasNext()) {
+            System.out.println(it.next().toString());
+          }
+
+          // switch back to development branch
+          this.switchBranch("development", git);
+          HttpResponse r = new HttpResponse("OK", HttpURLConnection.HTTP_OK);
+          return r;
+        } else {
+          throw new Exception("Unable to merge master and development branch");
+        }
+
+      }
+
+
+
+    } catch (Exception e) {
+      logger.printStackTrace(e);
+      HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
+      return r;
+    }
+  }
+
   @POST
   @Path("{repositoryName}/file/")
   @Consumes(MediaType.APPLICATION_JSON)
-  @Produces(MediaType.TEXT_PLAIN)
+  @Produces(MediaType.APPLICATION_JSON)
   @ApiOperation(
       value = "Returns the content of the given file within the specified repository encoded in Base64.",
       notes = "Returns the content of the given file within the specified repository.")
@@ -259,6 +342,10 @@ public class GitHubProxyService extends Service {
       Repository repository = this.getRepository(repositoryName);
 
       try (Git git = new Git(repository)) {
+
+        // switch to development branch
+        this.switchBranch("development", git);
+
         File file = new File(repository.getDirectory().getParent(), filePath);
         if (file.exists()) {
 
@@ -277,7 +364,7 @@ public class GitHubProxyService extends Service {
           fW.close();
 
           git.add().addFilepattern(filePath).addFilepattern(getTraceFileName(fileName)).call();
-          git.commit().setMessage(commitMessage).call();
+          git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
           HttpResponse r =
               new HttpResponse("OK, file stored and commited", HttpURLConnection.HTTP_OK);
           return r;
@@ -309,6 +396,7 @@ public class GitHubProxyService extends Service {
       @QueryParam("file") String fileName) {
     try {
       Repository repository = this.getRepository(repositoryName);
+      repository.resolve("development");
       JSONObject fileTraces = this.getFileTraces(repository, fileName);
 
 
@@ -397,6 +485,7 @@ public class GitHubProxyService extends Service {
     try {
 
       Repository repository = this.getRepository(repoName);
+      repository.resolve("development");
       JSONArray tracedFiles = this.getTracedFiles(repository);
       TreeWalk treeWalk = getRepositoryTreeWalk(repository);
 
