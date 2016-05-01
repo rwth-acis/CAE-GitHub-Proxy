@@ -17,6 +17,7 @@ import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 
+import org.apache.commons.io.FileUtils;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.api.MergeResult;
@@ -242,8 +243,11 @@ public class GitHubProxyService extends Service {
     logger.info("created new local repository");
     String repositoryAddress = "https://github.com/" + gitHubOrganization + "/" + repoName + ".git";
     Repository repository = null;
-    repository =
-        Git.cloneRepository().setURI(repositoryAddress).setDirectory(path).call().getRepository();
+    try (Git result = Git.cloneRepository().setURI(repositoryAddress).setDirectory(path)
+        .setBranch("gh-pages").call()) {
+      repository = result.getRepository();
+    }
+
     return repository;
   }
 
@@ -394,8 +398,12 @@ public class GitHubProxyService extends Service {
       @ApiResponse(code = HttpURLConnection.HTTP_NOT_FOUND, message = "404, file not found")})
   public HttpResponse getFileInRepository(@PathParam("repositoryName") String repositoryName,
       @QueryParam("file") String fileName) {
+
+    Git git = null;
     try {
       Repository repository = this.getRepository(repositoryName);
+      git = new Git(repository);
+      this.switchBranch("development", git);
       repository.resolve("development");
       JSONObject fileTraces = this.getFileTraces(repository, fileName);
 
@@ -420,6 +428,10 @@ public class GitHubProxyService extends Service {
       logger.printStackTrace(e);
       HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
       return r;
+    } finally {
+      if (git != null) {
+        git.close();
+      }
     }
 
   }
@@ -481,10 +493,12 @@ public class GitHubProxyService extends Service {
     JSONObject jsonResponse = new JSONObject();
     JSONArray files = new JSONArray();
     jsonResponse.put("files", files);
-
+    Git git = null;
     try {
 
       Repository repository = this.getRepository(repoName);
+      git = new Git(repository);
+      this.switchBranch("development", git);
       repository.resolve("development");
       JSONArray tracedFiles = this.getTracedFiles(repository);
       TreeWalk treeWalk = getRepositoryTreeWalk(repository);
@@ -519,6 +533,10 @@ public class GitHubProxyService extends Service {
       logger.printStackTrace(e);
       HttpResponse r = new HttpResponse("IO error!", HttpURLConnection.HTTP_INTERNAL_ERROR);
       return r;
+    } finally {
+      if (git != null) {
+        git.close();
+      }
     }
 
     HttpResponse r =
@@ -581,6 +599,26 @@ public class GitHubProxyService extends Service {
       logger.printStackTrace(e);
       return new HttpResponse(e.getMessage(), HttpURLConnection.HTTP_INTERNAL_ERROR);
     }
+  }
+
+  @GET
+  @Path("/{repoName}/delete")
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Deletes the local repository of the given repository name",
+      notes = "Deletes the local repository.")
+  @ApiResponses(value = {
+      @ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, local repository deleted"),
+      @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR,
+          message = "Internal server error")})
+
+  public HttpResponse deleteLocalRepository(@PathParam("repoName") String repositoryName) {
+    try {
+      FileUtils.deleteDirectory(new File(repositoryName));
+    } catch (IOException e) {
+      logger.printStackTrace(e);
+      return new HttpResponse(e.getMessage(), HttpURLConnection.HTTP_INTERNAL_ERROR);
+    }
+    return new HttpResponse("Ok", HttpURLConnection.HTTP_OK);
   }
 
 }
