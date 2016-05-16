@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Serializable;
 import java.net.HttpURLConnection;
 import java.util.Base64;
 import java.util.HashMap;
@@ -75,8 +76,10 @@ import io.swagger.util.Json;
  * 
  * CAE GitHubProxy Service
  * 
- * A LAS2peer service providing an RESTful api to store and load files to and from a repository.
+ * A LAS2peer service providing an RESTful API to store and load files to and from a repository.
  * Part of the CAE.
+ * 
+ * @author Thomas Winkler
  * 
  */
 
@@ -98,8 +101,8 @@ public class GitHubProxyService extends Service {
   private String gitHubUser;
   private String gitHubPassword;
   private String gitHubOrganization;
-  private String templateRepository;
   private String gitHubUserMail;
+  private boolean useModelCheck;
 
   public GitHubProxyService() {
     setFieldValues();
@@ -196,6 +199,7 @@ public class GitHubProxyService extends Service {
     addFiletoFileList(tw, files, "");
   }
 
+  @SuppressWarnings("unchecked")
   public HashMap<String, JSONObject> getAllTracedFiles(String repositoryName) {
     HashMap<String, JSONObject> files = new HashMap<String, JSONObject>();
 
@@ -296,10 +300,18 @@ public class GitHubProxyService extends Service {
     git.checkout().setName(branchName).call();
   }
 
+  /**
+   * Merges the development branch of the given repository with the master/gh-pages branch and
+   * pushes the changes to the remote repository.
+   * 
+   * @param repositoryName The name of the repository to push the local changes to
+   * @return
+   */
+
   @PUT
   @Path("{repositoryName}/push/")
-  @Produces(MediaType.TEXT_PLAIN)
-  @ApiOperation(value = "Push the commits to the remote repo.",
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Merge and push the commits to the remote repository",
       notes = "Push the commits to the remote repo.")
   @ApiResponses(value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, file found"),
       @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR,
@@ -307,14 +319,34 @@ public class GitHubProxyService extends Service {
   public HttpResponse pushToRemote(@PathParam("repositoryName") String repositoryName) {
     try {
       // TODO: implement lock during the pushing
+
+      // determine which branch to merge in
       boolean isFrontend = repositoryName.startsWith("frontendComponent-");
       String masterBranchName = isFrontend ? "gh-pages" : "master";
+
+      if (this.useModelCheck) {
+        Serializable[] payload = {repositoryName};
+        JSONArray guidances = (JSONArray) this.invokeServiceMethod(
+            "i5.las2peer.services.codeGenerationService.CodeGenerationService@0.1", "checkModel",
+            payload);
+        if (guidances.size() > 0) {
+          JSONObject result = new JSONObject();
+          result.put("status", "Model violation check fails");
+          result.put("guidances", guidances);
+          HttpResponse r =
+              new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_INTERNAL_ERROR);
+          return r;
+        } else {
+          HttpResponse r = new HttpResponse("OK", HttpURLConnection.HTTP_OK);
+          return r;
+        }
+      }
 
       Repository repository = this.getRepository(repositoryName);
 
       try (Git git = new Git(repository)) {
         this.switchBranch(masterBranchName, git);
-        // TODO: check fetch and pull results
+
         git.fetch().call();
         git.pull().call();
 
@@ -331,22 +363,18 @@ public class GitHubProxyService extends Service {
           PushCommand pushCmd = git.push();
           pushCmd.setCredentialsProvider(cp).setForce(true).setPushAll();
           Iterator<PushResult> it = pushCmd.call().iterator();
-          while (it.hasNext()) {
-            System.out.println(it.next().toString());
-          }
 
           // switch back to development branch
           this.switchBranch("development", git);
-          HttpResponse r = new HttpResponse("OK", HttpURLConnection.HTTP_OK);
+
+          JSONObject result = new JSONObject();
+          result.put("status", "ok");
+          HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
           return r;
         } else {
           throw new Exception("Unable to merge master and development branch");
         }
-
       }
-
-
-
     } catch (Exception e) {
       logger.printStackTrace(e);
       HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
@@ -689,6 +717,27 @@ public class GitHubProxyService extends Service {
     return r;
   }
 
+  @GET
+  @Path("/{repoName}/delete")
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Deletes the local repository of the given repository name",
+      notes = "Deletes the local repository.")
+  @ApiResponses(value = {
+      @ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, local repository deleted"),
+      @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR,
+          message = "Internal server error")})
+
+  public HttpResponse deleteLocalRepository(@PathParam("repoName") String repositoryName) {
+    try {
+      FileUtils.deleteDirectory(new File(repositoryName));
+    } catch (IOException e) {
+      logger.printStackTrace(e);
+      return new HttpResponse(e.getMessage(), HttpURLConnection.HTTP_INTERNAL_ERROR);
+    }
+    return new HttpResponse("Ok", HttpURLConnection.HTTP_OK);
+  }
+
+
   ////////////////////////////////////////////////////////////////////////////////////////
   // Methods required by the LAS2peer framework.
   ////////////////////////////////////////////////////////////////////////////////////////
@@ -744,26 +793,6 @@ public class GitHubProxyService extends Service {
       logger.printStackTrace(e);
       return new HttpResponse(e.getMessage(), HttpURLConnection.HTTP_INTERNAL_ERROR);
     }
-  }
-
-  @GET
-  @Path("/{repoName}/delete")
-  @Produces(MediaType.APPLICATION_JSON)
-  @ApiOperation(value = "Deletes the local repository of the given repository name",
-      notes = "Deletes the local repository.")
-  @ApiResponses(value = {
-      @ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, local repository deleted"),
-      @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR,
-          message = "Internal server error")})
-
-  public HttpResponse deleteLocalRepository(@PathParam("repoName") String repositoryName) {
-    try {
-      FileUtils.deleteDirectory(new File(repositoryName));
-    } catch (IOException e) {
-      logger.printStackTrace(e);
-      return new HttpResponse(e.getMessage(), HttpURLConnection.HTTP_INTERNAL_ERROR);
-    }
-    return new HttpResponse("Ok", HttpURLConnection.HTTP_OK);
   }
 
 }
