@@ -282,8 +282,12 @@ public class GitHubProxyService extends Service {
     logger.info("created new local repository");
     String repositoryAddress = "https://github.com/" + gitHubOrganization + "/" + repoName + ".git";
     Repository repository = null;
+
+    boolean isFrontend = repoName.startsWith("frontendComponent-");
+    String masterBranchName = isFrontend ? "gh-pages" : "master";
+
     try (Git result = Git.cloneRepository().setURI(repositoryAddress).setDirectory(path)
-        .setBranch("gh-pages").call()) {
+        .setBranch(masterBranchName).call()) {
       repository = result.getRepository();
     }
 
@@ -313,9 +317,9 @@ public class GitHubProxyService extends Service {
   @Produces(MediaType.APPLICATION_JSON)
   @ApiOperation(value = "Merge and push the commits to the remote repository",
       notes = "Push the commits to the remote repo.")
-  @ApiResponses(value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, file found"),
-      @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR,
-          message = "Internal server error")})
+  @ApiResponses(
+      value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK"), @ApiResponse(
+          code = HttpURLConnection.HTTP_INTERNAL_ERROR, message = "Internal server error")})
   public HttpResponse pushToRemote(@PathParam("repositoryName") String repositoryName) {
     try {
       // TODO: implement lock during the pushing
@@ -333,8 +337,7 @@ public class GitHubProxyService extends Service {
           JSONObject result = new JSONObject();
           result.put("status", "Model violation check fails");
           result.put("guidances", guidances);
-          HttpResponse r =
-              new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_INTERNAL_ERROR);
+          HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
           return r;
         } else {
           HttpResponse r = new HttpResponse("OK", HttpURLConnection.HTTP_OK);
