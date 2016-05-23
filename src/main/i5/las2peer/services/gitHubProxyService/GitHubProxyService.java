@@ -146,7 +146,7 @@ public class GitHubProxyService extends Service {
         String content = this.getFileContent(repository, getTraceFileName(fileName));
         JSONParser parser = new JSONParser();
         fileTraces = (JSONObject) parser.parse(content);
-        fileTraces.put("generatedID", traceModel.get("id"));
+        fileTraces.put("generationId", traceModel.get("id"));
       } catch (FileNotFoundException e) {
         logger.printStackTrace(e);
       }
@@ -465,6 +465,20 @@ public class GitHubProxyService extends Service {
 
           java.nio.file.Path p = java.nio.file.Paths.get(filePath);
           String fileName = p.getFileName().toString();
+
+          JSONObject currentTraceFile = this.getFileTraces(repository, filePath);
+          if (currentTraceFile != null) {
+            String generationId = (String) currentTraceFile.get("generationId");
+            String payloadGenerationId = (String) traces.get("generationId");
+            System.out.println(generationId + "=" + payloadGenerationId);
+            if (!generationId.equals(payloadGenerationId)) {
+              HttpResponse r = new HttpResponse("Commit rejected. Wrong generation id",
+                  HttpURLConnection.HTTP_CONFLICT);
+              return r;
+            }
+
+
+          }
 
           File traceFile =
               new File(repository.getDirectory().getParent(), getTraceFileName(fileName));
