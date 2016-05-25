@@ -8,7 +8,6 @@ import java.io.Serializable;
 import java.net.HttpURLConnection;
 import java.util.Base64;
 import java.util.HashMap;
-import java.util.Iterator;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
@@ -21,28 +20,6 @@ import javax.ws.rs.QueryParam;
 
 import org.apache.commons.io.FileUtils;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.MergeCommand;
-import org.eclipse.jgit.api.MergeResult;
-import org.eclipse.jgit.api.PushCommand;
-import org.eclipse.jgit.api.errors.CheckoutConflictException;
-import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.api.errors.InvalidRefNameException;
-import org.eclipse.jgit.api.errors.InvalidRemoteException;
-import org.eclipse.jgit.api.errors.RefAlreadyExistsException;
-import org.eclipse.jgit.api.errors.RefNotFoundException;
-import org.eclipse.jgit.api.errors.TransportException;
-import org.eclipse.jgit.lib.Constants;
-import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.ObjectLoader;
-import org.eclipse.jgit.lib.ObjectReader;
-import org.eclipse.jgit.lib.Ref;
-import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.merge.MergeStrategy;
-import org.eclipse.jgit.revwalk.RevTree;
-import org.eclipse.jgit.revwalk.RevWalk;
-import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import org.eclipse.jgit.transport.CredentialsProvider;
-import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.PathFilter;
@@ -60,6 +37,7 @@ import i5.las2peer.restMapper.MediaType;
 import i5.las2peer.restMapper.RESTMapper;
 import i5.las2peer.restMapper.annotations.ContentParam;
 import i5.las2peer.restMapper.annotations.Version;
+import i5.las2peer.services.gitHubProxyService.gitUtils.GitHelper;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiResponse;
@@ -87,7 +65,7 @@ import io.swagger.util.Json;
 @Version("0.1")
 @Api
 @SwaggerDefinition(info = @Info(title = "CAE GitHub Proxy Service", version = "0.1",
-    description = "A LAS2peer service used for store and load files from CAE components on GitHub. Part of the CAE.",
+    description = "A LAS2peer service used for store and load files of CAE components to and from GitHub. Part of the CAE.",
     termsOfService = "none",
     contact = @Contact(name = "Thomas Winkler", url = "https://github.com/thwinkler/",
         email = "winkler@dbis.rwth-aachen.de"),
@@ -108,33 +86,23 @@ public class GitHubProxyService extends Service {
     setFieldValues();
   }
 
-  private Repository getRepository(String repoName) throws Exception {
-    File localPath;
-    Repository repository = null;
-    try {
-      localPath = new File(repoName);
-      File repoFile = new File(localPath + "/.git");
-
-      if (!repoFile.exists()) {
-        repository = this.createLocalRepository(localPath, repoName);
-      } else {
-        FileRepositoryBuilder builder = new FileRepositoryBuilder();
-        repository = builder.setGitDir(repoFile).readEnvironment().findGitDir().build();
-      }
-    } catch (Exception e) {
-      throw e;
-    }
-
-    return repository;
-  }
-
-  public static String getTraceFileName(String fileName) {
+  private static String getTraceFileName(String fileName) {
     return "traces/" + fileName + ".traces";
   }
 
+  /**
+   * Get the traces for a file
+   * 
+   * @param git The git object of the repository of the file
+   * @param fullFileName The file name whose traces should be returned. Must be the full file name,
+   *        i.e. with full file path
+   * @return A JSONObject of the file traces or null if the file does not have any traces
+   * @throws Exception Thrown if something went wrong
+   */
+
   @SuppressWarnings("unchecked")
-  private JSONObject getFileTraces(Repository repository, String fullFileName) throws Exception {
-    JSONObject traceModel = this.getTraceModel(repository);
+  private JSONObject getFileTraces(Git git, String fullFileName) throws Exception {
+    JSONObject traceModel = this.getTraceModel(git);
     JSONArray tracedFiles = (JSONArray) traceModel.get("tracedFiles");
     JSONObject fileTraces = null;
 
@@ -143,7 +111,7 @@ public class GitHubProxyService extends Service {
     if (tracedFiles.contains(fullFileName)) {
 
       try {
-        String content = this.getFileContent(repository, getTraceFileName(fileName));
+        String content = GitHelper.getFileContent(git.getRepository(), getTraceFileName(fileName));
         JSONParser parser = new JSONParser();
         fileTraces = (JSONObject) parser.parse(content);
         fileTraces.put("generationId", traceModel.get("id"));
@@ -156,15 +124,21 @@ public class GitHubProxyService extends Service {
 
   }
 
-
+  /**
+   * Get the global trace model of a component
+   * 
+   * @param git The git object of the repository
+   * @return A JSONObject of the trace model.
+   * @throws Exception Thrown if something went wrong.
+   */
 
   @SuppressWarnings("unchecked")
-  private JSONObject getTraceModel(Repository repository) throws Exception {
+  private JSONObject getTraceModel(Git git) throws Exception {
     JSONObject result = new JSONObject();
     JSONArray tracedFiles = new JSONArray();
     result.put("tracedFiles", tracedFiles);
     try {
-      String jsonCode = this.getFileContent(repository, "traces/tracedFiles.json");
+      String jsonCode = GitHelper.getFileContent(git.getRepository(), "traces/tracedFiles.json");
       JSONParser parser = new JSONParser();
       result = (JSONObject) parser.parse(jsonCode);
     } catch (FileNotFoundException e) {
@@ -175,13 +149,17 @@ public class GitHubProxyService extends Service {
     return result;
   }
 
+  /**
+   * A private helper method to add the current file or folder of a tree walk to a json array.
+   * 
+   * @param tw The tree walk which current file/folder should be added to the json array
+   * @param files The json array the current file/folder should be added
+   * @param path The path of the current file
+   */
+
   @SuppressWarnings("unchecked")
   private static void addFiletoFileList(TreeWalk tw, JSONArray fileList, String path) {
     String name = tw.getPathString();
-
-    // if (!path.isEmpty()) {
-    // name = name.substring(path.length() + 1);
-    // }
 
     JSONObject fileObject = new JSONObject();
 
@@ -194,6 +172,12 @@ public class GitHubProxyService extends Service {
     fileList.add(fileObject);
   }
 
+  /**
+   * A private helper method to add the current file or folder of a tree walk to a json array
+   * 
+   * @param tw The tree walk which current file/folder should be added to the json array
+   * @param files The json array the current file/folder should be added
+   */
 
   private static void addFile(TreeWalk tw, JSONArray files) {
     addFiletoFileList(tw, files, "");
@@ -203,16 +187,16 @@ public class GitHubProxyService extends Service {
   public HashMap<String, JSONObject> getAllTracedFiles(String repositoryName) {
     HashMap<String, JSONObject> files = new HashMap<String, JSONObject>();
 
-    try (Repository repository = this.getRepository(repositoryName)) {
-      repository.resolve("development");
-      JSONArray tracedFiles = (JSONArray) this.getTraceModel(repository).get("tracedFiles");
+    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
+      JSONArray tracedFiles = (JSONArray) this.getTraceModel(git).get("tracedFiles");
 
-      try (TreeWalk treeWalk = getRepositoryTreeWalk(repository, true)) {
+      try (TreeWalk treeWalk = GitHelper.getRepositoryTreeWalk(git.getRepository(), true)) {
         while (treeWalk.next()) {
           if (tracedFiles.contains(treeWalk.getPathString())) {
             JSONObject fileObject = new JSONObject();
-            String content = this.getFileContent(repository, treeWalk.getPathString());
-            JSONObject fileTraces = this.getFileTraces(repository, treeWalk.getPathString());
+            String content =
+                GitHelper.getFileContent(git.getRepository(), treeWalk.getPathString());
+            JSONObject fileTraces = this.getFileTraces(git, treeWalk.getPathString());
 
             fileObject.put("content",
                 Base64.getEncoder().encodeToString(content.getBytes("utf-8")));
@@ -230,88 +214,16 @@ public class GitHubProxyService extends Service {
     return files;
   }
 
-  public String getFileContent(Repository repository, String fileName) throws Exception {
-
-    String content = "";
-
-    try (TreeWalk treeWalk = this.getRepositoryTreeWalk(repository)) {
-
-      treeWalk.setFilter(PathFilter.create(fileName));
-      boolean fileFound = false;
-
-      while (treeWalk.next()) {
-
-        if (!fileFound && treeWalk.isSubtree()) {
-          treeWalk.enterSubtree();
-        }
-        if (treeWalk.getPathString().equals(fileName)) {
-          fileFound = true;
-          break;
-        }
-
-      }
-      if (fileFound) {
-        ObjectReader reader = treeWalk.getObjectReader();
-        ObjectId objectId = treeWalk.getObjectId(0);
-        ObjectLoader loader = reader.open(objectId);
-        content = new String(loader.getBytes(), "UTF-8");
-      } else {
-        throw new FileNotFoundException(fileName + " not found");
-      }
-
-    }
-
-    return content;
-
-
-  }
-
-  public String getFileContent(String repositoryName, String fileName)
-      throws FileNotFoundException {
-    String content = "";
-    try (Repository repository = this.getRepository(repositoryName)) {
-      content = this.getFileContent(repository, fileName);
-    } catch (Exception e) {
-      logger.printStackTrace(e);
-    }
-    return content;
-  }
-
-  public Repository createLocalRepository(File path, String repoName)
-      throws InvalidRemoteException, TransportException, GitAPIException {
-    logger.info("created new local repository");
-    String repositoryAddress = "https://github.com/" + gitHubOrganization + "/" + repoName + ".git";
-    Repository repository = null;
-
-    boolean isFrontend = repoName.startsWith("frontendComponent-");
-    String masterBranchName = isFrontend ? "gh-pages" : "master";
-
-    try (Git result = Git.cloneRepository().setURI(repositoryAddress).setDirectory(path)
-        .setBranch(masterBranchName).call()) {
-      repository = result.getRepository();
-    }
-
-    return repository;
-  }
-
-  public void switchBranch(String branchName, Git git)
-      throws IOException, RefAlreadyExistsException, RefNotFoundException, InvalidRefNameException,
-      CheckoutConflictException, GitAPIException {
-    boolean branchExists = git.getRepository().getRef(branchName) != null;
-    if (!branchExists) {
-      git.branchCreate().setName(branchName).call();
-    }
-    git.checkout().setName(branchName).call();
-  }
-
   /**
    * Merges the development branch of the given repository with the master/gh-pages branch and
    * pushes the changes to the remote repository.
    * 
    * @param repositoryName The name of the repository to push the local changes to
-   * @return
+   * @return HttpResponse containing the status code of the request or the result of the model
+   *         violation if it fails
    */
 
+  @SuppressWarnings("unchecked")
   @PUT
   @Path("{repositoryName}/push/")
   @Produces(MediaType.APPLICATION_JSON)
@@ -344,40 +256,12 @@ public class GitHubProxyService extends Service {
           return r;
         }
       }
-
-      Repository repository = this.getRepository(repositoryName);
-
-      try (Git git = new Git(repository)) {
-        this.switchBranch(masterBranchName, git);
-
-        git.fetch().call();
-        git.pull().call();
-
-        MergeCommand mCmd = git.merge();
-        Ref HEAD = repository.getRef("refs/heads/development");
-        mCmd.include(HEAD);
-        mCmd.setStrategy(MergeStrategy.THEIRS);
-        MergeResult mRes = mCmd.call();
-
-        if (mRes.getMergeStatus().isSuccessful()) {
-          CredentialsProvider cp =
-              new UsernamePasswordCredentialsProvider(gitHubUser, gitHubPassword);
-
-          PushCommand pushCmd = git.push();
-          pushCmd.setCredentialsProvider(cp).setForce(true).setPushAll();
-          Iterator<PushResult> it = pushCmd.call().iterator();
-
-          // switch back to development branch
-          this.switchBranch("development", git);
-
-          JSONObject result = new JSONObject();
-          result.put("status", "ok");
-          HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
-          return r;
-        } else {
-          throw new Exception("Unable to merge master and development branch");
-        }
-      }
+      GitHelper.mergeIntoMasterBranch(repositoryName, gitHubOrganization, masterBranchName,
+          new UsernamePasswordCredentialsProvider(gitHubUser, gitHubPassword));
+      JSONObject result = new JSONObject();
+      result.put("status", "ok");
+      HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
+      return r;
     } catch (Exception e) {
       logger.printStackTrace(e);
       HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
@@ -385,21 +269,26 @@ public class GitHubProxyService extends Service {
     }
   }
 
-  public HttpResponse storeAndCommitFleRaw(String repositoryName, String filePath, String content) {
+  /**
+   * Store the content of a file encoded in based64 to a repository
+   * 
+   * @param repositoryName The name of the repository
+   * @param filePath The absolute path of the file
+   * @param content The content of the file encoded in base64
+   * @return A status string
+   */
+
+  public String storeAndCommitFleRaw(String repositoryName, String filePath, String content) {
     try {
       String commitMessage = "someMessage";
 
       byte[] base64decodedBytes = Base64.getDecoder().decode(content);
       String decodedString = new String(base64decodedBytes, "utf-8");
 
-      Repository repository = this.getRepository(repositoryName);
 
-      try (Git git = new Git(repository)) {
+      try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
 
-        // switch to development branch
-        this.switchBranch("development", git);
-
-        File file = new File(repository.getDirectory().getParent(), filePath);
+        File file = new File(git.getRepository().getDirectory().getParent(), filePath);
         if (file.exists()) {
 
           FileWriter fW = new FileWriter(file, false);
@@ -408,30 +297,37 @@ public class GitHubProxyService extends Service {
 
           git.add().addFilepattern(filePath).call();
           git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
-          HttpResponse r =
-              new HttpResponse("OK, file stored and commited", HttpURLConnection.HTTP_OK);
-          return r;
+
+          return "done";
         } else {
-          HttpResponse r = new HttpResponse("404", HttpURLConnection.HTTP_NOT_FOUND);
-          return r;
+          return filePath + " not found!";
         }
 
       }
 
     } catch (Exception e) {
       logger.printStackTrace(e);
-      HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
-      return r;
+      return e.getMessage();
     }
   }
+
+  /**
+   * Store the content and traces for a file in the corresponding repository and commit it to the
+   * local repository.
+   * 
+   * @param repositoryName The name of the repository
+   * @param content A json string containing the content of the file encoded in base64 and its file
+   *        traces
+   * @return HttpResponse with the status code of the request
+   */
 
   @POST
   @Path("{repositoryName}/file/")
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.TEXT_PLAIN)
   @ApiOperation(
-      value = "Returns the content of the given file within the specified repository encoded in Base64.",
-      notes = "Returns the content of the given file within the specified repository.")
+      value = "Stores the content for the given file in the local repository and commits the changes.",
+      notes = "Stores the content for the given file in the local repository and commits the changes.")
   @ApiResponses(value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, file found"),
       @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR, message = "Internal server error"),
       @ApiResponse(code = HttpURLConnection.HTTP_NOT_FOUND, message = "404, file not found")})
@@ -449,14 +345,10 @@ public class GitHubProxyService extends Service {
       byte[] base64decodedBytes = Base64.getDecoder().decode(fileContent);
       String decodedString = new String(base64decodedBytes, "utf-8");
 
-      Repository repository = this.getRepository(repositoryName);
 
-      try (Git git = new Git(repository)) {
+      try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
 
-        // switch to development branch
-        this.switchBranch("development", git);
-
-        File file = new File(repository.getDirectory().getParent(), filePath);
+        File file = new File(git.getRepository().getDirectory().getParent(), filePath);
         if (file.exists()) {
 
           FileWriter fW = new FileWriter(file, false);
@@ -466,7 +358,7 @@ public class GitHubProxyService extends Service {
           java.nio.file.Path p = java.nio.file.Paths.get(filePath);
           String fileName = p.getFileName().toString();
 
-          JSONObject currentTraceFile = this.getFileTraces(repository, filePath);
+          JSONObject currentTraceFile = this.getFileTraces(git, filePath);
           if (currentTraceFile != null) {
             String generationId = (String) currentTraceFile.get("generationId");
             String payloadGenerationId = (String) traces.get("generationId");
@@ -476,12 +368,10 @@ public class GitHubProxyService extends Service {
                   HttpURLConnection.HTTP_CONFLICT);
               return r;
             }
-
-
           }
 
           File traceFile =
-              new File(repository.getDirectory().getParent(), getTraceFileName(fileName));
+              new File(git.getRepository().getDirectory().getParent(), getTraceFileName(fileName));
 
           fW = new FileWriter(traceFile, false);
           fW.write(traces.toJSONString());
@@ -506,6 +396,15 @@ public class GitHubProxyService extends Service {
     }
   }
 
+  /**
+   * Calculate and returns the file name and segment id for a given model id.
+   * 
+   * @param repositoryName The name of the repository
+   * @param modelId The id of the model.
+   * @return HttpResponse with the status code of the request and the file name and segment id of
+   *         the model
+   */
+
   @SuppressWarnings("unchecked")
   @GET
   @Path("{repositoryName}/segment/{modelId}")
@@ -519,26 +418,18 @@ public class GitHubProxyService extends Service {
   public HttpResponse getSegmentOfModelId(@PathParam("repositoryName") String repositoryName,
       @PathParam("modelId") String modelId) {
 
-    Git git = null;
-    Repository repository = null;
-    try {
-
-      repository = this.getRepository(repositoryName);
-      git = new Git(repository);
-
-      this.switchBranch("development", git);
-      repository.resolve("development");
+    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
 
       JSONObject resultObject = new JSONObject();
 
-      JSONObject traceModel = this.getTraceModel(repository);
+      JSONObject traceModel = this.getTraceModel(git);
       JSONObject modelsToFiles = (JSONObject) traceModel.get("modelsToFile");
 
       if (modelsToFiles != null) {
         if (modelsToFiles.containsKey(modelId)) {
           JSONArray fileList = (JSONArray) ((JSONObject) modelsToFiles.get(modelId)).get("files");
           String fileName = (String) fileList.get(0);
-          JSONObject fileTraceModel = this.getFileTraces(repository, fileName);
+          JSONObject fileTraceModel = this.getFileTraces(git, fileName);
           JSONObject fileTraces = (JSONObject) fileTraceModel.get("traces");
           JSONArray segments = (JSONArray) ((JSONObject) fileTraces.get(modelId)).get("segments");
           String segmentId = (String) segments.get(0);
@@ -562,16 +453,18 @@ public class GitHubProxyService extends Service {
       logger.printStackTrace(e);
       HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
       return r;
-    } finally {
-      if (git != null) {
-        git.close();
-      }
-      if (repository != null) {
-        repository.close();
-      }
     }
 
   }
+
+  /**
+   * Returns the content encoded in base64 of a file in a repository
+   * 
+   * @param repositoryName The name of the repository
+   * @param fileName The absolute path of the file
+   * @return HttpResponse containing the status code of the request and the content of the file
+   *         encoded in base64 if everything was fine.
+   */
 
   @SuppressWarnings("unchecked")
   @GET
@@ -586,16 +479,11 @@ public class GitHubProxyService extends Service {
   public HttpResponse getFileInRepository(@PathParam("repositoryName") String repositoryName,
       @QueryParam("file") String fileName) {
 
-    Git git = null;
-    try {
-      Repository repository = this.getRepository(repositoryName);
-      git = new Git(repository);
-      this.switchBranch("development", git);
-      repository.resolve("development");
-      JSONObject fileTraces = this.getFileTraces(repository, fileName);
+    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
 
+      JSONObject fileTraces = this.getFileTraces(git, fileName);
 
-      String content = this.getFileContent(repository, fileName);
+      String content = GitHelper.getFileContent(git.getRepository(), fileName);
       String contentBase64 = Base64.getEncoder().encodeToString(content.getBytes("utf-8"));
 
       JSONObject resultObject = new JSONObject();
@@ -615,44 +503,15 @@ public class GitHubProxyService extends Service {
       logger.printStackTrace(e);
       HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
       return r;
-    } finally {
-      if (git != null) {
-        git.close();
-      }
     }
 
-  }
-
-  public TreeWalk getRepositoryTreeWalk(Repository repository) throws Exception {
-    return this.getRepositoryTreeWalk(repository, false);
-  }
-
-  public TreeWalk getRepositoryTreeWalk(Repository repository, boolean recursive) throws Exception {
-
-    RevWalk revWalk = null;
-    TreeWalk treeWalk = null;
-    try {
-      ObjectId lastCommitId = repository.resolve(Constants.HEAD);
-      treeWalk = new TreeWalk(repository);
-      revWalk = new RevWalk(repository);
-      RevTree tree = revWalk.parseCommit(lastCommitId).getTree();
-      treeWalk.addTree(tree);
-      treeWalk.setRecursive(recursive);
-
-    } catch (Exception e) {
-      throw e;
-    } finally {
-      repository.close();
-      revWalk.close();
-    }
-
-    return treeWalk;
   }
 
   /**
+   * List all files of a folder of a repository.
    * 
-   * @param repoName the name of the repository
-   * 
+   * @param repositoryName the name of the repository
+   * @param path the path of the folder whose files should be listed
    * @return HttpResponse containing the files of the given repository as a json string
    * 
    */
@@ -661,13 +520,13 @@ public class GitHubProxyService extends Service {
   @GET
   @Path("/{repoName}/files")
   @Produces(MediaType.APPLICATION_JSON)
-  @ApiOperation(value = "Lists all files of the given repository.",
+  @ApiOperation(value = "Lists all files of a folder of the given repository.",
       notes = "Lists all files of the given repository.")
   @ApiResponses(value = {
       @ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, repository of the model found"),
       @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR,
           message = "Internal server error")})
-  public HttpResponse listFilesInRepository(@PathParam("repoName") String repoName,
+  public HttpResponse listFilesInRepository(@PathParam("repoName") String repositoryName,
       @QueryParam("path") String path) {
 
     if (path == null) {
@@ -679,16 +538,10 @@ public class GitHubProxyService extends Service {
     JSONObject jsonResponse = new JSONObject();
     JSONArray files = new JSONArray();
     jsonResponse.put("files", files);
-    Git git = null;
-    Repository repository = null;
-    try {
+    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
 
-      repository = this.getRepository(repoName);
-      git = new Git(repository);
-      this.switchBranch("development", git);
-      repository.resolve("development");
-      JSONArray tracedFiles = (JSONArray) this.getTraceModel(repository).get("tracedFiles");
-      TreeWalk treeWalk = getRepositoryTreeWalk(repository);
+      JSONArray tracedFiles = (JSONArray) this.getTraceModel(git).get("tracedFiles");
+      TreeWalk treeWalk = GitHelper.getRepositoryTreeWalk(git.getRepository());
 
       if (path.isEmpty()) {
         while (treeWalk.next()) {
@@ -720,19 +573,19 @@ public class GitHubProxyService extends Service {
       logger.printStackTrace(e);
       HttpResponse r = new HttpResponse("IO error!", HttpURLConnection.HTTP_INTERNAL_ERROR);
       return r;
-    } finally {
-      if (git != null) {
-        git.close();
-      }
-      if (repository != null) {
-        repository.close();
-      }
     }
 
     HttpResponse r =
         new HttpResponse(jsonResponse.toString().replace("\\", ""), HttpURLConnection.HTTP_OK);
     return r;
   }
+
+  /**
+   * Deletes a local repository
+   * 
+   * @param repositoryName The repository to delete
+   * @return HttpResponse containing a status code
+   */
 
   @GET
   @Path("/{repoName}/delete")
