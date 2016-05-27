@@ -55,8 +55,44 @@ public class GitHelper {
   }
 
   /**
+   * Rename a file within a repository. This method does not commit the renaming.
+   * 
+   * @param repositoryName The name of the repository
+   * @param gitHubOrganization The github organization
+   * @param newFileName The path of the new file name, relative to the working directory
+   * @param oldFileName The path of the old file t, relative to the working directory
+   * @throws FileNotFoundException Thrown if the renamed file is not found
+   * @throws IOException Thrown if something during the renaming went wrong
+   * @throws Exception Thrown if something else went wrong
+   */
+
+  public static void renameFile(String repositoryName, String gitHubOrganization,
+      String newFileName, String oldFileName) throws FileNotFoundException, Exception {
+    try (Git git = getLocalGit(repositoryName, gitHubOrganization, "development")) {
+      File oldFile = new File(getRepositoryPath(repositoryName) + "/" + oldFileName);
+      File newFile = new File(getRepositoryPath(repositoryName) + "/" + newFileName);
+
+      if (newFile.getParentFile() != null) {
+        newFile.getParentFile().mkdirs();
+      }
+
+      oldFile.renameTo(newFile);
+      git.add().addFilepattern(newFileName).call();
+      git.rm().addFilepattern(oldFileName).call();
+      // delete empty folder of old file
+      if (oldFile.getParentFile() != null) {
+        File parent = oldFile.getParentFile();
+        if (parent.isDirectory() && parent.list().length == 0) {
+          parent.delete();
+        }
+      }
+
+    }
+  }
+
+  /**
    * Merge the development branch of the repository to the given master branch and push it to the
-   * remote repository
+   * remote repository *
    * 
    * @param repositoryName The name of the repository
    * @param gitHubOragnization The github organization
@@ -81,11 +117,13 @@ public class GitHelper {
       MergeResult mRes = mCmd.call();
 
       if (mRes.getMergeStatus().isSuccessful()) {
-
+        logger.info("Merged development and master branch successfully");
+        logger.info("Now pushing the commits...");
         PushCommand pushCmd = git.push();
-        pushCmd.setCredentialsProvider(cp).setForce(true).setPushAll();
-
+        pushCmd.setCredentialsProvider(cp).setForce(true).setPushAll().call();
+        logger.info("... commits pushed");
       } else {
+        logger.warning("Error during merging of development and master branch");
         throw new Exception("Unable to merge master and development branch");
       }
     } finally {

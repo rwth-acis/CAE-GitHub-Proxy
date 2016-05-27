@@ -106,12 +106,11 @@ public class GitHubProxyService extends Service {
     JSONArray tracedFiles = (JSONArray) traceModel.get("tracedFiles");
     JSONObject fileTraces = null;
 
-    java.nio.file.Path p = java.nio.file.Paths.get(fullFileName);
-    String fileName = p.getFileName().toString();
     if (tracedFiles.contains(fullFileName)) {
 
       try {
-        String content = GitHelper.getFileContent(git.getRepository(), getTraceFileName(fileName));
+        String content =
+            GitHelper.getFileContent(git.getRepository(), getTraceFileName(fullFileName));
         JSONParser parser = new JSONParser();
         fileTraces = (JSONObject) parser.parse(content);
         fileTraces.put("generationId", traceModel.get("id"));
@@ -251,9 +250,6 @@ public class GitHubProxyService extends Service {
           result.put("guidances", guidances);
           HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
           return r;
-        } else {
-          HttpResponse r = new HttpResponse("OK", HttpURLConnection.HTTP_OK);
-          return r;
         }
       }
       GitHelper.mergeIntoMasterBranch(repositoryName, gitHubOrganization, masterBranchName,
@@ -270,41 +266,79 @@ public class GitHubProxyService extends Service {
   }
 
   /**
-   * Store the content of a file encoded in based64 to a repository
+   * Store the content of the files encoded in based64 to a repository
    * 
    * @param repositoryName The name of the repository
-   * @param filePath The absolute path of the file
-   * @param content The content of the file encoded in base64
+   * @param commitMessage The commit message to use
+   * @param files The file list containing the files to commit
    * @return A status string
    */
 
-  public String storeAndCommitFleRaw(String repositoryName, String filePath, String content) {
+  public String storeAndCommitFilesRaw(String repositoryName, String commitMessage,
+      String[][] files) {
+
     try {
-      String commitMessage = "someMessage";
-
-      byte[] base64decodedBytes = Base64.getDecoder().decode(content);
-      String decodedString = new String(base64decodedBytes, "utf-8");
-
+      commitMessage = "someMessage";
 
       try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
+        for (String[] fileData : files) {
 
-        File file = new File(git.getRepository().getDirectory().getParent(), filePath);
-        if (file.exists()) {
+          String filePath = fileData[0];
+          String content = fileData[1];
 
-          FileWriter fW = new FileWriter(file, false);
-          fW.write(decodedString);
-          fW.close();
+          byte[] base64decodedBytes = Base64.getDecoder().decode(content);
+          String decodedString = new String(base64decodedBytes, "utf-8");
 
-          git.add().addFilepattern(filePath).call();
-          git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
 
-          return "done";
-        } else {
-          return filePath + " not found!";
+          File file = new File(git.getRepository().getDirectory().getParent(), filePath);
+          if (file.exists()) {
+
+            FileWriter fW = new FileWriter(file, false);
+            fW.write(decodedString);
+            fW.close();
+
+            git.add().addFilepattern(filePath).call();
+          } else {
+            throw new FileNotFoundException(filePath + " not found!");
+          }
         }
 
+        git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
       }
 
+    } catch (Exception e) {
+      logger.printStackTrace(e);
+      return e.getMessage();
+    }
+
+    return "done";
+  }
+
+  /**
+   * Rename a file of a repository.
+   * 
+   * @param repositoryName The name of the repository
+   * @param newFileName The new file name
+   * @param oldFileName The old file name
+   * @return String with the status code of the request
+   */
+
+  public String renameFile(String repositoryName, String newFileName, String oldFileName) {
+    try (Git git = GitHelper.getLocalGit(repositoryName, newFileName, "development")) {
+
+      GitHelper.renameFile(repositoryName, gitHubOrganization, newFileName, oldFileName);
+      JSONObject currentTraceFile = this.getFileTraces(git, oldFileName);
+
+      // also rename the trace file if it exists
+      if (currentTraceFile != null) {
+        GitHelper.renameFile(repositoryName, gitHubOrganization, getTraceFileName(newFileName),
+            getTraceFileName(oldFileName));
+      }
+
+      return "done";
+    } catch (FileNotFoundException e) {
+      logger.printStackTrace(e);
+      return e.getMessage();
     } catch (Exception e) {
       logger.printStackTrace(e);
       return e.getMessage();
@@ -345,7 +379,6 @@ public class GitHubProxyService extends Service {
       byte[] base64decodedBytes = Base64.getDecoder().decode(fileContent);
       String decodedString = new String(base64decodedBytes, "utf-8");
 
-
       try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
 
         File file = new File(git.getRepository().getDirectory().getParent(), filePath);
@@ -362,7 +395,6 @@ public class GitHubProxyService extends Service {
           if (currentTraceFile != null) {
             String generationId = (String) currentTraceFile.get("generationId");
             String payloadGenerationId = (String) traces.get("generationId");
-            System.out.println(generationId + "=" + payloadGenerationId);
             if (!generationId.equals(payloadGenerationId)) {
               HttpResponse r = new HttpResponse("Commit rejected. Wrong generation id",
                   HttpURLConnection.HTTP_CONFLICT);

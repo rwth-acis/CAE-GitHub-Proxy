@@ -4,8 +4,8 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Repository;
 
 /**
- * A special git class that also close the repository if itself will be closed. We need this class
- * as this behavior is not possible with the original git class.
+ * A special git class that always close the connected repository if it is closed. We need this
+ * special class as this behavior is not possible with the original git class.
  * 
  * @author Thomas Winkler
  *
@@ -19,6 +19,7 @@ public class AutoCloseGit extends Git {
 
   @Override
   public void close() {
+    // always close the repository connected to
     this.getRepository().close();
   }
 
