@@ -277,34 +277,29 @@ public class GitHubProxyService extends Service {
   public String storeAndCommitFilesRaw(String repositoryName, String commitMessage,
       String[][] files) {
 
-    try {
-      commitMessage = "someMessage";
+    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
+      for (String[] fileData : files) {
 
-      try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
-        for (String[] fileData : files) {
+        String filePath = fileData[0];
+        String content = fileData[1];
 
-          String filePath = fileData[0];
-          String content = fileData[1];
+        byte[] base64decodedBytes = Base64.getDecoder().decode(content);
+        String decodedString = new String(base64decodedBytes, "utf-8");
 
-          byte[] base64decodedBytes = Base64.getDecoder().decode(content);
-          String decodedString = new String(base64decodedBytes, "utf-8");
+        File file = new File(git.getRepository().getDirectory().getParent(), filePath);
+        if (file.exists()) {
+          FileWriter fW = new FileWriter(file, false);
+          fW.write(decodedString);
+          fW.close();
 
-
-          File file = new File(git.getRepository().getDirectory().getParent(), filePath);
-          if (file.exists()) {
-
-            FileWriter fW = new FileWriter(file, false);
-            fW.write(decodedString);
-            fW.close();
-
-            git.add().addFilepattern(filePath).call();
-          } else {
-            throw new FileNotFoundException(filePath + " not found!");
-          }
+          git.add().addFilepattern(filePath).call();
+        } else {
+          throw new FileNotFoundException(filePath + " not found!");
         }
-
-        git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
       }
+
+      git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
+
 
     } catch (Exception e) {
       logger.printStackTrace(e);
@@ -346,8 +341,7 @@ public class GitHubProxyService extends Service {
   }
 
   /**
-   * Store the content and traces for a file in the corresponding repository and commit it to the
-   * local repository.
+   * Store the content and traces of a file in a repository and commit it to the local repository.
    * 
    * @param repositoryName The name of the repository
    * @param content A json string containing the content of the file encoded in base64 and its file
@@ -403,13 +397,13 @@ public class GitHubProxyService extends Service {
           }
 
           File traceFile =
-              new File(git.getRepository().getDirectory().getParent(), getTraceFileName(fileName));
+              new File(git.getRepository().getDirectory().getParent(), getTraceFileName(filePath));
 
           fW = new FileWriter(traceFile, false);
           fW.write(traces.toJSONString());
           fW.close();
 
-          git.add().addFilepattern(filePath).addFilepattern(getTraceFileName(fileName)).call();
+          git.add().addFilepattern(filePath).addFilepattern(getTraceFileName(filePath)).call();
           git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
           HttpResponse r =
               new HttpResponse("OK, file stored and commited", HttpURLConnection.HTTP_OK);
