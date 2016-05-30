@@ -71,7 +71,7 @@ public class GitHelper {
     try (Git git = getLocalGit(repositoryName, gitHubOrganization, "development")) {
       File oldFile = new File(getRepositoryPath(repositoryName) + "/" + oldFileName);
       File newFile = new File(getRepositoryPath(repositoryName) + "/" + newFileName);
-
+      System.out.println("rename " + oldFile + "to " + newFile);
       if (newFile.getParentFile() != null) {
         newFile.getParentFile().mkdirs();
       }
@@ -80,11 +80,15 @@ public class GitHelper {
       git.add().addFilepattern(newFileName).call();
       git.rm().addFilepattern(oldFileName).call();
       // delete empty folder of old file
-      if (oldFile.getParentFile() != null) {
+      while (oldFile.getParentFile() != null) {
         File parent = oldFile.getParentFile();
         if (parent.isDirectory() && parent.list().length == 0) {
+          oldFile = parent;
           parent.delete();
+        } else {
+          break;
         }
+
       }
 
     }
