@@ -157,13 +157,19 @@ public class GitHubProxyService extends Service {
    */
 
   @SuppressWarnings("unchecked")
-  private static void addFiletoFileList(TreeWalk tw, JSONArray fileList, String path) {
+  private static void addFiletoFileList(TreeWalk tw, JSONArray fileList, JSONArray tracedFiles,
+      String path) {
     String name = tw.getPathString();
 
     JSONObject fileObject = new JSONObject();
 
     if (tw.isSubtree()) {
+      if (name.equals("traces")) {
+        return;
+      }
       fileObject.put("type", "folder");
+    } else if (!tracedFiles.contains(name)) {
+      return;
     } else {
       fileObject.put("type", "file");
     }
@@ -178,8 +184,8 @@ public class GitHubProxyService extends Service {
    * @param files The json array the current file/folder should be added
    */
 
-  private static void addFile(TreeWalk tw, JSONArray files) {
-    addFiletoFileList(tw, files, "");
+  private static void addFile(TreeWalk tw, JSONArray files, JSONArray tracedFiles) {
+    addFiletoFileList(tw, files, tracedFiles, "");
   }
 
   @SuppressWarnings("unchecked")
@@ -244,6 +250,7 @@ public class GitHubProxyService extends Service {
         JSONArray guidances = (JSONArray) this.invokeServiceMethod(
             "i5.las2peer.services.codeGenerationService.CodeGenerationService@0.1", "checkModel",
             payload);
+        System.out.println(guidances.toString());
         if (guidances.size() > 0) {
           JSONObject result = new JSONObject();
           result.put("status", "Model violation check fails");
@@ -287,15 +294,17 @@ public class GitHubProxyService extends Service {
         String decodedString = new String(base64decodedBytes, "utf-8");
 
         File file = new File(git.getRepository().getDirectory().getParent(), filePath);
-        if (file.exists()) {
-          FileWriter fW = new FileWriter(file, false);
-          fW.write(decodedString);
-          fW.close();
-
-          git.add().addFilepattern(filePath).call();
-        } else {
-          throw new FileNotFoundException(filePath + " not found!");
+        if (!file.exists()) {
+          File dirs = file.getParentFile();
+          dirs.mkdirs();
+          file.createNewFile();
         }
+        FileWriter fW = new FileWriter(file, false);
+        fW.write(decodedString);
+        fW.close();
+
+        git.add().addFilepattern(filePath).call();
+
       }
 
       git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
@@ -571,7 +580,7 @@ public class GitHubProxyService extends Service {
 
       if (path.isEmpty()) {
         while (treeWalk.next()) {
-          addFile(treeWalk, files);
+          addFile(treeWalk, files, tracedFiles);
         }
       } else {
 
@@ -589,7 +598,7 @@ public class GitHubProxyService extends Service {
             continue;
           }
           if (folderFound) {
-            addFiletoFileList(treeWalk, files, path);
+            addFiletoFileList(treeWalk, files, tracedFiles, path);
           }
         }
       }
