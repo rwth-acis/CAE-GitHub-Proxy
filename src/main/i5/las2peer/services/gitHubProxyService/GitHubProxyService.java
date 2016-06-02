@@ -220,59 +220,6 @@ public class GitHubProxyService extends Service {
   }
 
   /**
-   * Merges the development branch of the given repository with the master/gh-pages branch and
-   * pushes the changes to the remote repository.
-   * 
-   * @param repositoryName The name of the repository to push the local changes to
-   * @return HttpResponse containing the status code of the request or the result of the model
-   *         violation if it fails
-   */
-
-  @SuppressWarnings("unchecked")
-  @PUT
-  @Path("{repositoryName}/push/")
-  @Produces(MediaType.APPLICATION_JSON)
-  @ApiOperation(value = "Merge and push the commits to the remote repository",
-      notes = "Push the commits to the remote repo.")
-  @ApiResponses(
-      value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK"), @ApiResponse(
-          code = HttpURLConnection.HTTP_INTERNAL_ERROR, message = "Internal server error")})
-  public HttpResponse pushToRemote(@PathParam("repositoryName") String repositoryName) {
-    try {
-      // TODO: implement lock during the pushing
-
-      // determine which branch to merge in
-      boolean isFrontend = repositoryName.startsWith("frontendComponent-");
-      String masterBranchName = isFrontend ? "gh-pages" : "master";
-
-      if (this.useModelCheck) {
-        Serializable[] payload = {repositoryName};
-        JSONArray guidances = (JSONArray) this.invokeServiceMethod(
-            "i5.las2peer.services.codeGenerationService.CodeGenerationService@0.1", "checkModel",
-            payload);
-        System.out.println(guidances.toString());
-        if (guidances.size() > 0) {
-          JSONObject result = new JSONObject();
-          result.put("status", "Model violation check fails");
-          result.put("guidances", guidances);
-          HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
-          return r;
-        }
-      }
-      GitHelper.mergeIntoMasterBranch(repositoryName, gitHubOrganization, masterBranchName,
-          new UsernamePasswordCredentialsProvider(gitHubUser, gitHubPassword));
-      JSONObject result = new JSONObject();
-      result.put("status", "ok");
-      HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
-      return r;
-    } catch (Exception e) {
-      logger.printStackTrace(e);
-      HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
-      return r;
-    }
-  }
-
-  /**
    * Store the content of the files encoded in based64 to a repository
    * 
    * @param repositoryName The name of the repository
@@ -346,6 +293,57 @@ public class GitHubProxyService extends Service {
     } catch (Exception e) {
       logger.printStackTrace(e);
       return e.getMessage();
+    }
+  }
+
+  /**
+   * Merges the development branch of the given repository with the master/gh-pages branch and
+   * pushes the changes to the remote repository.
+   * 
+   * @param repositoryName The name of the repository to push the local changes to
+   * @return HttpResponse containing the status code of the request or the result of the model
+   *         violation if it fails
+   */
+
+  @SuppressWarnings("unchecked")
+  @PUT
+  @Path("{repositoryName}/push/")
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Merge and push the commits to the remote repository",
+      notes = "Push the commits to the remote repo.")
+  @ApiResponses(
+      value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK"), @ApiResponse(
+          code = HttpURLConnection.HTTP_INTERNAL_ERROR, message = "Internal server error")})
+  public HttpResponse pushToRemote(@PathParam("repositoryName") String repositoryName) {
+    try {
+
+      // determine which branch to merge in
+      boolean isFrontend = repositoryName.startsWith("frontendComponent-");
+      String masterBranchName = isFrontend ? "gh-pages" : "master";
+
+      if (this.useModelCheck) {
+        Serializable[] payload = {repositoryName};
+        JSONArray guidances = (JSONArray) this.invokeServiceMethod(
+            "i5.las2peer.services.codeGenerationService.CodeGenerationService@0.1", "checkModel",
+            payload);
+        if (guidances.size() > 0) {
+          JSONObject result = new JSONObject();
+          result.put("status", "Model violation check fails");
+          result.put("guidances", guidances);
+          HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
+          return r;
+        }
+      }
+      GitHelper.mergeIntoMasterBranch(repositoryName, gitHubOrganization, masterBranchName,
+          new UsernamePasswordCredentialsProvider(gitHubUser, gitHubPassword));
+      JSONObject result = new JSONObject();
+      result.put("status", "ok");
+      HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
+      return r;
+    } catch (Exception e) {
+      logger.printStackTrace(e);
+      HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
+      return r;
     }
   }
 
@@ -487,6 +485,55 @@ public class GitHubProxyService extends Service {
     } catch (Exception e) {
       logger.printStackTrace(e);
       HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
+      return r;
+    }
+
+  }
+
+  /**
+   * Get the files needed for the live preview widget collected in one response
+   */
+
+  @SuppressWarnings("unchecked")
+  @GET
+  @Path("{repositoryName}/livePreviewFiles/")
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(
+      value = "Returns all needed files for the live preview widget of the given repository encoded in Base64.",
+      notes = "Returns all needed files for the live preview widget.")
+  @ApiResponses(value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, file found"),
+      @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR, message = "Internal server error"),
+      @ApiResponse(code = HttpURLConnection.HTTP_NOT_FOUND, message = "404, file not found")})
+  public HttpResponse getLivePreviewFiles(@PathParam("repositoryName") String repositoryName) {
+    if (repositoryName.startsWith("frontendComponent")) {
+      try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
+
+        JSONObject result = new JSONObject();
+        JSONArray fileList = new JSONArray();
+
+        String[] neededFileNames = {"widget.xml", "js/applicationScript.js"};
+
+        for (String fileName : neededFileNames) {
+          String content = GitHelper.getFileContent(git.getRepository(), fileName);
+          String contentBase64 = Base64.getEncoder().encodeToString(content.getBytes("utf-8"));
+
+          JSONObject fileObject = new JSONObject();
+          fileObject.put("fileName", fileName);
+          fileObject.put("content", contentBase64);
+          fileList.add(fileObject);
+        }
+
+        result.put("files", fileList);
+        HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
+        return r;
+      } catch (Exception e) {
+        logger.printStackTrace(e);
+        HttpResponse r = new HttpResponse("Internal Error", HttpURLConnection.HTTP_INTERNAL_ERROR);
+        return r;
+      }
+    } else {
+      HttpResponse r = new HttpResponse("Only frontend components are supported",
+          HttpURLConnection.HTTP_NOT_ACCEPTABLE);
       return r;
     }
 
