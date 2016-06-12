@@ -5,6 +5,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.LsRemoteCommand;
 import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.api.MergeResult;
 import org.eclipse.jgit.api.PushCommand;
@@ -139,6 +140,43 @@ public class GitHelper {
   }
 
   /**
+   * Checks whether a remote repository of the given name in the given github organization exists.
+   * Uses the ls remote git command to determine if the repository exists.
+   * 
+   * @param url The url of the repository
+   * 
+   * @return True, if the repository exists, otherwise false
+   */
+
+  public static boolean existsRemoteRepository(String url) {
+    LsRemoteCommand lsCmd = new LsRemoteCommand(null);
+    lsCmd.setRemote(url);
+    lsCmd.setHeads(true);
+    boolean exists = true;
+    try {
+      lsCmd.call();
+    } catch (Exception e) {
+      // ignore the exception, as this is the way we determine if a remote repository exists
+      exists = false;
+    }
+    return exists;
+  }
+
+  /**
+   * Checks if the local repository already exists
+   * 
+   * @param repositoryName The name of the repository
+   * @return True, if the local repository exists
+   */
+
+  public static boolean existsLocalRepository(String repositoryName) {
+    File localPath;
+    localPath = getRepositoryPath(repositoryName);
+    File repoFile = new File(localPath + "/.git");
+    return repoFile.exists();
+  }
+
+  /**
    * Get the local repository with the given name within the given github organization. If a local
    * repository does not exist yet, it will be created.
    * 
@@ -156,7 +194,10 @@ public class GitHelper {
     File repoFile = new File(localPath + "/.git");
 
     if (!repoFile.exists()) {
-      repository = createLocalRepository(repositoryName, gitHubOrganization);
+      try {
+        repository = createLocalRepository(repositoryName, gitHubOrganization);
+      } catch (TransportException e) {
+      }
     } else {
       FileRepositoryBuilder builder = new FileRepositoryBuilder();
       repository = builder.setGitDir(repoFile).readEnvironment().findGitDir().build();
@@ -288,10 +329,10 @@ public class GitHelper {
    * 
    * @param git The git instance to checkout
    * @param branchName The name of the branch
-   * @throws IOException Thrown if an i/o occurs
+   * @throws IOException Thrown if an i/o error occurs
    * @throws RefAlreadyExistsException Thrown if we try to create a new branch if it already exists
-   * @throws RefNotFoundException Thrown if we try to checkout the branch if it does not exists
-   * @throws InvalidRefNameException Thrown if an invalid branch name is given
+   * @throws RefNotFoundException Thrown if we try to checkout a branch that does not exist
+   * @throws InvalidRefNameException Thrown when an invalid remote is used internally
    * @throws CheckoutConflictException Thrown if something went wrong during the checkout
    * @throws GitAPIException Thrown if something went wrong during the branch creation or checkout
    */
@@ -299,6 +340,9 @@ public class GitHelper {
   public static void switchBranch(Git git, String branchName)
       throws IOException, RefAlreadyExistsException, RefNotFoundException, InvalidRefNameException,
       CheckoutConflictException, GitAPIException {
+    if (git.getRepository().getBranch().equals(branchName)) {
+      return;
+    }
     boolean branchExists = git.getRepository().getRef(branchName) != null;
     if (!branchExists) {
       git.branchCreate().setName(branchName).call();
@@ -312,13 +356,14 @@ public class GitHelper {
    * @param repositoryName The name of the repository
    * @param gitHubOrganization The github organization of the repository
    * @return The new created local repository
-   * @throws InvalidRemoteException
-   * @throws TransportException
-   * @throws GitAPIException
+   * @throws InvalidRemoteException Thrown when an invalid remote is used internally
+   * @throws TransportException Thrown if a protocol error has occurred
+   * @throws GitAPIException Thrown by any git API classes
+   * @throws FileNotFoundException Thrown if the remote repository does not exists
    */
 
   private static Repository createLocalRepository(String repositoryName, String gitHubOrganization)
-      throws InvalidRemoteException, TransportException, GitAPIException {
+      throws InvalidRemoteException, TransportException, GitAPIException, FileNotFoundException {
     logger.info("created new local repository " + repositoryName);
     String repositoryAddress =
         "https://github.com/" + gitHubOrganization + "/" + repositoryName + ".git";
@@ -327,9 +372,13 @@ public class GitHelper {
     boolean isFrontend = repositoryName.startsWith("frontendComponent-");
     String masterBranchName = isFrontend ? "gh-pages" : "master";
 
-    try (Git result = Git.cloneRepository().setURI(repositoryAddress)
-        .setDirectory(getRepositoryPath(repositoryName)).setBranch(masterBranchName).call()) {
-      repository = result.getRepository();
+    if (existsRemoteRepository(repositoryAddress)) {
+      try (Git result = Git.cloneRepository().setURI(repositoryAddress)
+          .setDirectory(getRepositoryPath(repositoryName)).setBranch(masterBranchName).call()) {
+        repository = result.getRepository();
+      }
+    } else {
+      throw new FileNotFoundException("Remote repository: " + repositoryAddress + " not found!");
     }
 
     return repository;

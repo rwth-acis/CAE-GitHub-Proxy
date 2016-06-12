@@ -123,6 +123,27 @@ public class GitHubProxyService extends Service {
 
   }
 
+  @SuppressWarnings("unchecked")
+  private static JSONObject getGuidances(Git git) {
+
+    JSONObject guidances = new JSONObject();
+    // add empty json array
+    guidances.put("guidances", new JSONArray());
+
+    JSONParser parser = new JSONParser();
+    String content = "traces/guidances.json";
+    if (content.length() > 0) {
+      try {
+        guidances =
+            (JSONObject) parser.parse(GitHelper.getFileContent(git.getRepository(), content));
+      } catch (Exception e) {
+        logger.printStackTrace(e);
+      }
+    }
+
+    return guidances;
+  }
+
   /**
    * Get the global trace model of a component
    * 
@@ -321,19 +342,6 @@ public class GitHubProxyService extends Service {
       boolean isFrontend = repositoryName.startsWith("frontendComponent-");
       String masterBranchName = isFrontend ? "gh-pages" : "master";
 
-      if (this.useModelCheck) {
-        Serializable[] payload = {repositoryName};
-        JSONArray guidances = (JSONArray) this.invokeServiceMethod(
-            "i5.las2peer.services.codeGenerationService.CodeGenerationService@0.1", "checkModel",
-            payload);
-        if (guidances.size() > 0) {
-          JSONObject result = new JSONObject();
-          result.put("status", "Model violation check fails");
-          result.put("guidances", guidances);
-          HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
-          return r;
-        }
-      }
       GitHelper.mergeIntoMasterBranch(repositoryName, gitHubOrganization, masterBranchName,
           new UsernamePasswordCredentialsProvider(gitHubUser, gitHubPassword));
       JSONObject result = new JSONObject();
@@ -356,10 +364,11 @@ public class GitHubProxyService extends Service {
    * @return HttpResponse with the status code of the request
    */
 
+  @SuppressWarnings("unchecked")
   @POST
   @Path("{repositoryName}/file/")
   @Consumes(MediaType.APPLICATION_JSON)
-  @Produces(MediaType.TEXT_PLAIN)
+  @Produces(MediaType.APPLICATION_JSON)
   @ApiOperation(
       value = "Stores the content for the given file in the local repository and commits the changes.",
       notes = "Stores the content for the given file in the local repository and commits the changes.")
@@ -369,6 +378,7 @@ public class GitHubProxyService extends Service {
   public HttpResponse storeAndCommitFle(@PathParam("repositoryName") String repositoryName,
       @ContentParam String content) {
     try {
+      JSONObject result = new JSONObject();
 
       JSONParser parser = new JSONParser();
       JSONObject contentObject = (JSONObject) parser.parse(content);
@@ -390,7 +400,27 @@ public class GitHubProxyService extends Service {
           fW.close();
 
           java.nio.file.Path p = java.nio.file.Paths.get(filePath);
-          String fileName = p.getFileName().toString();
+
+          if (this.useModelCheck) {
+            JSONObject tracedFileObject = new JSONObject();
+            tracedFileObject.put("content", fileContent);
+            tracedFileObject.put("fileTraces", traces);
+
+            HashMap<String, JSONObject> tracedFile = new HashMap<String, JSONObject>();
+            tracedFile.put(filePath, tracedFileObject);
+
+            Serializable[] payload = {getGuidances(git), tracedFile};
+            JSONArray guidances = (JSONArray) this.invokeServiceMethod(
+                "i5.las2peer.services.codeGenerationService.CodeGenerationService@0.1",
+                "checkModel", payload);
+            if (guidances.size() > 0) {
+
+              result.put("status", "Model violation check fails");
+              result.put("guidances", guidances);
+              HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
+              return r;
+            }
+          }
 
           JSONObject currentTraceFile = this.getFileTraces(git, filePath);
           if (currentTraceFile != null) {
@@ -412,8 +442,8 @@ public class GitHubProxyService extends Service {
 
           git.add().addFilepattern(filePath).addFilepattern(getTraceFileName(filePath)).call();
           git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
-          HttpResponse r =
-              new HttpResponse("OK, file stored and commited", HttpURLConnection.HTTP_OK);
+          result.put("status", "OK, file stored and commited");
+          HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
           return r;
         } else {
           HttpResponse r = new HttpResponse("404", HttpURLConnection.HTTP_NOT_FOUND);
@@ -505,7 +535,9 @@ public class GitHubProxyService extends Service {
       @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR, message = "Internal server error"),
       @ApiResponse(code = HttpURLConnection.HTTP_NOT_FOUND, message = "404, file not found")})
   public HttpResponse getLivePreviewFiles(@PathParam("repositoryName") String repositoryName) {
-    if (repositoryName.startsWith("frontendComponent")) {
+    if (repositoryName.startsWith("frontendComponent")
+        && GitHelper.existsLocalRepository(repositoryName)) {
+
       try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
 
         JSONObject result = new JSONObject();
@@ -525,6 +557,11 @@ public class GitHubProxyService extends Service {
 
         result.put("files", fileList);
         HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
+        return r;
+      } catch (FileNotFoundException e) {
+        logger.info(repositoryName + " not found");
+        HttpResponse r =
+            new HttpResponse(repositoryName + " not found", HttpURLConnection.HTTP_NOT_FOUND);
         return r;
       } catch (Exception e) {
         logger.printStackTrace(e);
