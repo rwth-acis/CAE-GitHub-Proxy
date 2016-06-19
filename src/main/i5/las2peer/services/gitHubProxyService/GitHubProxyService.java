@@ -375,8 +375,8 @@ public class GitHubProxyService extends Service {
   @ApiResponses(value = {@ApiResponse(code = HttpURLConnection.HTTP_OK, message = "OK, file found"),
       @ApiResponse(code = HttpURLConnection.HTTP_INTERNAL_ERROR, message = "Internal server error"),
       @ApiResponse(code = HttpURLConnection.HTTP_NOT_FOUND, message = "404, file not found")})
-  public HttpResponse storeAndCommitFle(@PathParam("repositoryName") String repositoryName,
-      @ContentParam String content) {
+  public synchronized HttpResponse storeAndCommitFle(
+      @PathParam("repositoryName") String repositoryName, @ContentParam String content) {
     try {
       JSONObject result = new JSONObject();
 
@@ -399,8 +399,6 @@ public class GitHubProxyService extends Service {
           fW.write(decodedString);
           fW.close();
 
-          java.nio.file.Path p = java.nio.file.Paths.get(filePath);
-
           if (this.useModelCheck) {
             JSONObject tracedFileObject = new JSONObject();
             tracedFileObject.put("content", fileContent);
@@ -410,13 +408,13 @@ public class GitHubProxyService extends Service {
             tracedFile.put(filePath, tracedFileObject);
 
             Serializable[] payload = {getGuidances(git), tracedFile};
-            JSONArray guidances = (JSONArray) this.invokeServiceMethod(
+            JSONArray feedback = (JSONArray) this.invokeServiceMethod(
                 "i5.las2peer.services.codeGenerationService.CodeGenerationService@0.1",
                 "checkModel", payload);
-            if (guidances.size() > 0) {
+            if (feedback.size() > 0) {
 
               result.put("status", "Model violation check fails");
-              result.put("guidances", guidances);
+              result.put("feedbackItems", feedback);
               HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
               return r;
             }
@@ -442,6 +440,7 @@ public class GitHubProxyService extends Service {
 
           git.add().addFilepattern(filePath).addFilepattern(getTraceFileName(filePath)).call();
           git.commit().setAuthor(gitHubUser, gitHubUserMail).setMessage(commitMessage).call();
+
           result.put("status", "OK, file stored and commited");
           HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
           return r;
@@ -522,6 +521,10 @@ public class GitHubProxyService extends Service {
 
   /**
    * Get the files needed for the live preview widget collected in one response
+   * 
+   * @param repositoryName The name of the repository
+   * @return HttpResponse containing the status code of the request and the content of the needed
+   *         files for the live preview widget encoded in base64 if everything was fine.
    */
 
   @SuppressWarnings("unchecked")
@@ -538,26 +541,32 @@ public class GitHubProxyService extends Service {
     if (repositoryName.startsWith("frontendComponent")
         && GitHelper.existsLocalRepository(repositoryName)) {
 
-      try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
+      try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization)) {
+        if (git.getRepository().getBranch().equals("development")) {
 
-        JSONObject result = new JSONObject();
-        JSONArray fileList = new JSONArray();
+          JSONObject result = new JSONObject();
+          JSONArray fileList = new JSONArray();
 
-        String[] neededFileNames = {"widget.xml", "js/applicationScript.js"};
+          String[] neededFileNames = {"widget.xml", "js/applicationScript.js"};
 
-        for (String fileName : neededFileNames) {
-          String content = GitHelper.getFileContent(git.getRepository(), fileName);
-          String contentBase64 = Base64.getEncoder().encodeToString(content.getBytes("utf-8"));
+          for (String fileName : neededFileNames) {
+            String content = GitHelper.getFileContent(git.getRepository(), fileName);
+            String contentBase64 = Base64.getEncoder().encodeToString(content.getBytes("utf-8"));
 
-          JSONObject fileObject = new JSONObject();
-          fileObject.put("fileName", fileName);
-          fileObject.put("content", contentBase64);
-          fileList.add(fileObject);
+            JSONObject fileObject = new JSONObject();
+            fileObject.put("fileName", fileName);
+            fileObject.put("content", contentBase64);
+            fileList.add(fileObject);
+          }
+
+          result.put("files", fileList);
+          HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
+          return r;
+        } else {
+          HttpResponse r = new HttpResponse(repositoryName + " currently unavailable",
+              HttpURLConnection.HTTP_UNAVAILABLE);
+          return r;
         }
-
-        result.put("files", fileList);
-        HttpResponse r = new HttpResponse(result.toJSONString(), HttpURLConnection.HTTP_OK);
-        return r;
       } catch (FileNotFoundException e) {
         logger.info(repositoryName + " not found");
         HttpResponse r =

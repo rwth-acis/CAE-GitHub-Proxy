@@ -207,6 +207,21 @@ public class GitHelper {
 
   /**
    * Get a {@link org.eclipse.jgit.api.Git} for a repository with the given name and github
+   * organization
+   * 
+   * @param repositoryName The name of the repository
+   * @param gitHubOrganization The github organization of the repository
+   * @return A {@link org.eclipse.jgit.api.Git}
+   * @throws Exception
+   */
+
+  public static Git getLocalGit(String repositoryName, String gitHubOrganization) throws Exception {
+    Git git = new AutoCloseGit(getLocalRepository(repositoryName, gitHubOrganization));
+    return git;
+  }
+
+  /**
+   * Get a {@link org.eclipse.jgit.api.Git} for a repository with the given name and github
    * organization checked out to the given branch name.
    * 
    * @param repositoryName The name of the repository
@@ -218,7 +233,7 @@ public class GitHelper {
 
   public static Git getLocalGit(String repositoryName, String gitHubOrganization, String branchName)
       throws Exception {
-    Git git = new AutoCloseGit(getLocalRepository(repositoryName, gitHubOrganization));
+    Git git = getLocalGit(repositoryName, gitHubOrganization);
     switchBranch(git, branchName);
     return git;
   }
@@ -239,7 +254,10 @@ public class GitHelper {
   }
 
   /**
-   * @see i5.las2peer.services.gitHubProxyService.gitUtils.GitHelper#getRepositoryTreeWalk
+   * Get a non recursive {@link org.eclipse.jgit.treewalk.TreeWalk} of the repository.
+   * 
+   * @param repository The repository
+   * @return The tree walk of the repository or null if there was an error
    */
 
   public static TreeWalk getRepositoryTreeWalk(Repository repository) throws Exception {
@@ -382,6 +400,10 @@ public class GitHelper {
     }
 
     return repository;
+  }
+
+  public static boolean indexIsLocked(String repositoryName) {
+    return getRepositoryPath(repositoryName + "/.git/index.lock").exists();
   }
 
 }
