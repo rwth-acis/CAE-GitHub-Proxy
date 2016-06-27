@@ -296,7 +296,7 @@ public class GitHubProxyService extends Service {
    */
 
   public String renameFile(String repositoryName, String newFileName, String oldFileName) {
-    try (Git git = GitHelper.getLocalGit(repositoryName, newFileName, "development")) {
+    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
 
       GitHelper.renameFile(repositoryName, gitHubOrganization, newFileName, oldFileName);
       JSONObject currentTraceFile = this.getFileTraces(git, oldFileName);
@@ -305,6 +305,35 @@ public class GitHubProxyService extends Service {
       if (currentTraceFile != null) {
         GitHelper.renameFile(repositoryName, gitHubOrganization, getTraceFileName(newFileName),
             getTraceFileName(oldFileName));
+      }
+
+      return "done";
+    } catch (FileNotFoundException e) {
+      logger.printStackTrace(e);
+      return e.getMessage();
+    } catch (Exception e) {
+      logger.printStackTrace(e);
+      return e.getMessage();
+    }
+  }
+
+  /**
+   * Delete a file from a repository
+   * 
+   * @param repositoryName The name of the repository
+   * @param fileName The name of the file that must be deleted
+   * @return String with the status code of the request
+   */
+
+  public String deleteFile(String repositoryName, String fileName) {
+    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
+
+      GitHelper.deleteFile(repositoryName, gitHubOrganization, fileName);
+      JSONObject currentTraceFile = this.getFileTraces(git, fileName);
+
+      // also rename the trace file if it exists
+      if (currentTraceFile != null) {
+        GitHelper.deleteFile(repositoryName, gitHubOrganization, getTraceFileName(fileName));
       }
 
       return "done";
@@ -398,7 +427,7 @@ public class GitHubProxyService extends Service {
           FileWriter fW = new FileWriter(file, false);
           fW.write(decodedString);
           fW.close();
-
+          // call model violation check of the code generation service if enabled
           if (this.useModelCheck) {
             JSONObject tracedFileObject = new JSONObject();
             tracedFileObject.put("content", fileContent);
@@ -419,7 +448,7 @@ public class GitHubProxyService extends Service {
               return r;
             }
           }
-
+          // check generation id to avoid conflicts
           JSONObject currentTraceFile = this.getFileTraces(git, filePath);
           if (currentTraceFile != null) {
             String generationId = (String) currentTraceFile.get("generationId");

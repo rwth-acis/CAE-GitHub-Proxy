@@ -31,6 +31,7 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.PathFilter;
 
 import i5.las2peer.logging.L2pLogger;
+import i5.las2peer.logging.NodeObserver.Event;
 import i5.las2peer.services.gitHubProxyService.GitHubProxyService;
 
 /**
@@ -72,7 +73,10 @@ public class GitHelper {
     try (Git git = getLocalGit(repositoryName, gitHubOrganization, "development")) {
       File oldFile = new File(getRepositoryPath(repositoryName) + "/" + oldFileName);
       File newFile = new File(getRepositoryPath(repositoryName) + "/" + newFileName);
-      System.out.println("rename " + oldFile + "to " + newFile);
+
+      L2pLogger.logEvent(Event.SERVICE_MESSAGE,
+          "Renaming file " + oldFileName + " to " + newFileName);
+
       if (newFile.getParentFile() != null) {
         newFile.getParentFile().mkdirs();
       }
@@ -91,6 +95,30 @@ public class GitHelper {
         }
 
       }
+    }
+
+  }
+
+  /**
+   * Delete a file from a repository. This method does not commit the deletion.
+   * 
+   * @param repositoryName The name of the repository
+   * @param gitHubOrganization The github organization
+   * @param fileName The path of the file to be deleted
+   * @throws FileNotFoundException Thrown if file is not found
+   * @throws IOException Thrown if something during the deleting went wrong
+   * @throws Exception Thrown if something else went wrong
+   */
+
+  public static void deleteFile(String repositoryName, String gitHubOrganization, String fileName)
+      throws FileNotFoundException, IOException, Exception {
+    try (Git git = getLocalGit(repositoryName, gitHubOrganization, "development")) {
+      File file = new File(getRepositoryPath(repositoryName) + "/" + fileName);
+
+      L2pLogger.logEvent(Event.SERVICE_MESSAGE, "Deleting file " + fileName);
+
+      file.delete();
+      git.rm().addFilepattern(fileName).call();
 
     }
   }
@@ -122,11 +150,12 @@ public class GitHelper {
       MergeResult mRes = mCmd.call();
 
       if (mRes.getMergeStatus().isSuccessful()) {
-        logger.info("Merged development and master branch successfully");
-        logger.info("Now pushing the commits...");
+        L2pLogger.logEvent(Event.SERVICE_MESSAGE,
+            "Merged development and master branch successfully");
+        L2pLogger.logEvent(Event.SERVICE_MESSAGE, "Now pushing the commits...");
         PushCommand pushCmd = git.push();
         pushCmd.setCredentialsProvider(cp).setForce(true).setPushAll().call();
-        logger.info("... commits pushed");
+        L2pLogger.logEvent(Event.SERVICE_MESSAGE, "... commits pushed");
       } else {
         logger.warning("Error during merging of development and master branch");
         throw new Exception("Unable to merge master and development branch");
@@ -382,7 +411,7 @@ public class GitHelper {
 
   private static Repository createLocalRepository(String repositoryName, String gitHubOrganization)
       throws InvalidRemoteException, TransportException, GitAPIException, FileNotFoundException {
-    logger.info("created new local repository " + repositoryName);
+    L2pLogger.logEvent(Event.SERVICE_MESSAGE, "created new local repository " + repositoryName);
     String repositoryAddress =
         "https://github.com/" + gitHubOrganization + "/" + repositoryName + ".git";
     Repository repository = null;
