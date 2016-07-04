@@ -141,7 +141,6 @@ public class GitHelper {
     try {
       git = GitHelper.getLocalGit(repositoryName, gitHubOragnization, masterBranchName);
       git.fetch().call();
-      git.pull().call();
 
       MergeCommand mCmd = git.merge();
       Ref HEAD = git.getRepository().getRef("refs/heads/development");
