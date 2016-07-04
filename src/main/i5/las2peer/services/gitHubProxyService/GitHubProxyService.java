@@ -11,7 +11,6 @@ import java.util.HashMap;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
-import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
@@ -209,6 +208,13 @@ public class GitHubProxyService extends Service {
     addFiletoFileList(tw, files, tracedFiles, "");
   }
 
+  /**
+   * Get a list containing all traced files of a given repository
+   * 
+   * @param repositoryName The name of the repository
+   * @return A list of all traced files
+   */
+
   @SuppressWarnings("unchecked")
   public HashMap<String, JSONObject> getAllTracedFiles(String repositoryName) {
     HashMap<String, JSONObject> files = new HashMap<String, JSONObject>();
@@ -297,7 +303,6 @@ public class GitHubProxyService extends Service {
 
   public String renameFile(String repositoryName, String newFileName, String oldFileName) {
     try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
-
       GitHelper.renameFile(repositoryName, gitHubOrganization, newFileName, oldFileName);
       JSONObject currentTraceFile = this.getFileTraces(git, oldFileName);
 
@@ -394,7 +399,7 @@ public class GitHubProxyService extends Service {
    */
 
   @SuppressWarnings("unchecked")
-  @POST
+  @PUT
   @Path("{repositoryName}/file/")
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
@@ -758,6 +763,7 @@ public class GitHubProxyService extends Service {
     try {
       FileUtils.deleteDirectory(new File(repositoryName));
     } catch (IOException e) {
+      e.printStackTrace();
       logger.printStackTrace(e);
       return new HttpResponse(e.getMessage(), HttpURLConnection.HTTP_INTERNAL_ERROR);
     }
