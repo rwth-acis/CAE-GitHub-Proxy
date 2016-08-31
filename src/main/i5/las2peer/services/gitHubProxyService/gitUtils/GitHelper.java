@@ -211,21 +211,24 @@ public class GitHelper {
    * @param repositoryName The name of the repository
    * @param gitHubOrganization The github organization of the repository
    * @return The local repository
-   * @throws Exception
+   * @throws InvalidRemoteException Thrown when an invalid remote is used internally
+   * @throws TransportException Thrown if a protocol error has occurred
+   * @throws GitAPIException Thrown by any git API classes
+   * @throws IOException Thrown if a file system error occured
+   * @throws FileNotFoundException Thrown if the remote repository does not exists
    */
 
   public static Repository getLocalRepository(String repositoryName, String gitHubOrganization)
-      throws Exception {
+      throws FileNotFoundException, IOException, InvalidRemoteException, TransportException,
+      GitAPIException {
     File localPath;
     Repository repository = null;
     localPath = getRepositoryPath(repositoryName);
     File repoFile = new File(localPath + "/.git");
 
     if (!repoFile.exists()) {
-      try {
-        repository = createLocalRepository(repositoryName, gitHubOrganization);
-      } catch (TransportException e) {
-      }
+      repository = createLocalRepository(repositoryName, gitHubOrganization);
+
     } else {
       FileRepositoryBuilder builder = new FileRepositoryBuilder();
       repository = builder.setGitDir(repoFile).readEnvironment().findGitDir().build();
@@ -240,7 +243,7 @@ public class GitHelper {
    * @param repositoryName The name of the repository
    * @param gitHubOrganization The github organization of the repository
    * @return A {@link org.eclipse.jgit.api.Git}
-   * @throws Exception
+   * @throws Exception Thrown if an error occurred while getting the local repository
    */
 
   public static Git getLocalGit(String repositoryName, String gitHubOrganization) throws Exception {
@@ -256,7 +259,7 @@ public class GitHelper {
    * @param gitHubOrganization The github organization of the repository
    * @param branchName The branch name to checkout
    * @return A {@link org.eclipse.jgit.api.Git} checked out to the branch name
-   * @throws Exception
+   * @throws Exception Thrown if an error occurred while getting the local repository
    */
 
   public static Git getLocalGit(String repositoryName, String gitHubOrganization, String branchName)
@@ -272,7 +275,7 @@ public class GitHelper {
    * @param repository The git repository to use
    * @param branchName The branch name to checkout
    * @return A {@link org.eclipse.jgit.api.Git} checked out to the branch name
-   * @throws Exception
+   * @throws Exception Thrown if an error occurred while getting the local repository
    */
 
   public static Git getLocalGit(Repository repository, String branchName) throws Exception {
@@ -288,7 +291,7 @@ public class GitHelper {
    * @return The tree walk of the repository or null if there was an error
    */
 
-  public static TreeWalk getRepositoryTreeWalk(Repository repository) throws Exception {
+  public static TreeWalk getRepositoryTreeWalk(Repository repository) {
     return getRepositoryTreeWalk(repository, false);
   }
 
@@ -300,8 +303,7 @@ public class GitHelper {
    * @return The tree walk of the repository or null if there was an error
    */
 
-  public static TreeWalk getRepositoryTreeWalk(Repository repository, boolean recursive)
-      throws Exception {
+  public static TreeWalk getRepositoryTreeWalk(Repository repository, boolean recursive) {
 
     RevWalk revWalk = null;
     TreeWalk treeWalk = null;
