@@ -9,8 +9,10 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.Serializable;
+import java.util.HashMap;
 
 import org.apache.commons.io.FileUtils;
+import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.junit.AfterClass;
@@ -55,6 +57,8 @@ public class GitHubProxyServiceTest {
 
   private static JSONObject fileJson1;
   private static final String FILE_NAME1 = "./testfiles/testWidget1.json";
+  private static JSONObject fileJson2;
+  private static final String FILE_NAME2 = "./testfiles/testWidget2.json";
 
   /**
    * Called before the tests start.
@@ -66,6 +70,7 @@ public class GitHubProxyServiceTest {
     try {
       JSONParser parser = new JSONParser();
       fileJson1 = ((JSONObject) parser.parse(new FileReader(FILE_NAME1)));
+      fileJson2 = ((JSONObject) parser.parse(new FileReader(FILE_NAME2)));
     } catch (Exception e) {
       e.printStackTrace();
       fail("File loading problems: " + e);
@@ -89,7 +94,7 @@ public class GitHubProxyServiceTest {
     connector = new WebConnector(true, HTTP_PORT, false, 1000);
     connector.setLogStream(new PrintStream(logStream));
     connector.start(node);
-    Thread.sleep(10000); // wait a second for the connector to become ready
+    Thread.sleep(1000); // wait a second for the connector to become ready
     testAgent = MockAgentFactory.getAdam();
 
     connector.updateServiceList();
@@ -108,7 +113,7 @@ public class GitHubProxyServiceTest {
    */
 
   @Test
-  public void testGetFileContentTestNotYetCloned() {
+  public void getFileContentTestNotYetCloned() {
     MiniClient c = new MiniClient();
     c.setAddressPort(HTTP_ADDRESS, HTTP_PORT);
 
@@ -127,12 +132,72 @@ public class GitHubProxyServiceTest {
   }
 
   /**
+   * Tests the end point for the live preview widget
+   * 
+   * @throws Exception
+   */
+  @Test
+  public void getLivePreviewFilesTest() throws Exception {
+
+    // first clone a local repository
+    getFileContentTestNotYetCloned();
+
+    MiniClient c = new MiniClient();
+    c.setAddressPort(HTTP_ADDRESS, HTTP_PORT);
+
+    // test method
+    try {
+      c.setLogin(Long.toString(testAgent.getId()), testPass);
+      @SuppressWarnings("unchecked")
+      ClientResponse result = c.sendRequest("GET",
+          mainPath + "frontendComponent-JUnit-Test-Repository/livePreviewFiles/", "",
+          MediaType.APPLICATION_JSON, MediaType.APPLICATION_JSON, new Pair[] {});
+
+      assertEquals(200, result.getHttpCode());
+
+      JSONParser parser = new JSONParser();
+      JSONObject contentObject = (JSONObject) parser.parse(result.getResponse());
+      JSONArray files = (JSONArray) contentObject.get("files");
+      // file list should contains 2 files
+      assertEquals(2, files.size());
+    } catch (Exception e) {
+      e.printStackTrace();
+      fail("Exception: " + e);
+    }
+  }
+
+  /**
+   * Tests if files are persisted correctly
+   * 
+   * @throws Exception
+   */
+  @Test
+  public void persistFileTest() throws Exception {
+    MiniClient c = new MiniClient();
+    c.setAddressPort(HTTP_ADDRESS, HTTP_PORT);
+
+    // test method
+    try {
+      c.setLogin(Long.toString(testAgent.getId()), testPass);
+      @SuppressWarnings("unchecked")
+      ClientResponse result = c.sendRequest("PUT",
+          mainPath + "frontendComponent-JUnit-Test-Repository/file/", fileJson2.toJSONString(),
+          MediaType.APPLICATION_JSON, MediaType.APPLICATION_JSON, new Pair[] {});
+      assertEquals(200, result.getHttpCode());
+    } catch (Exception e) {
+      e.printStackTrace();
+      fail("Exception: " + e);
+    }
+  }
+
+
+  /**
    * Tests if files with an old generation id are rejected by the service
    * 
    * @throws Exception
    */
   @Test
-  public void rejectFileWithOldGenerationId() throws Exception {
+  public void rejectFileWithOldGenerationIdTest() throws Exception {
     MiniClient c = new MiniClient();
     c.setAddressPort(HTTP_ADDRESS, HTTP_PORT);
 
@@ -191,6 +256,24 @@ public class GitHubProxyServiceTest {
 
       assertEquals(false, fileLogo.exists());
 
+    } catch (Exception e) {
+      e.printStackTrace();
+      fail("Exception: " + e);
+    }
+  }
+
+  /**
+   * Tests if traced files of a repository are correctly received
+   */
+  @Test
+  public void getTracedFilesTest() {
+    try {
+      @SuppressWarnings("unchecked")
+      HashMap<String, JSONObject> tracedFiles =
+          (HashMap<String, JSONObject>) node.invoke(testService, testServiceNameVersion,
+              "getAllTracedFiles", new Serializable[] {testRepositoryName});
+
+      assertEquals(2, tracedFiles.size());
     } catch (Exception e) {
       e.printStackTrace();
       fail("Exception: " + e);
