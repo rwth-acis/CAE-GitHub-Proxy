@@ -55,7 +55,7 @@
 	<classpathentry kind="lib" path="lib/jackson-annotations-2.4.5.jar"/>
 	<classpathentry kind="lib" path="lib/jackson-core-2.4.5.jar"/>
 	<classpathentry kind="lib" path="lib/jackson-databind-2.4.5.jar"/>
-	<classpathentry kind="lib" path="lib/las2peer-0.5.7.jar"/>
-	<classpathentry kind="lib" path="lib/las2peer-web-connector-0.5.7.jar"/>
+	<classpathentry kind="lib" path="lib/las2peer-0.6-SNAPSHOT.jar"/>
+	<classpathentry kind="lib" path="lib/las2peer-web-connector-0.6-SNAPSHOT.jar"/>
 	<classpathentry kind="output" path="output"/>
 </classpath>
