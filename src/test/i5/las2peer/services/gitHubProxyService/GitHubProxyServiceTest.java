@@ -43,7 +43,7 @@ public class GitHubProxyServiceTest {
   private static WebConnector connector;
   private static ByteArrayOutputStream logStream;
 
-  private static final String mainPath = "CAE/github/";
+  private static final String mainPath = "githubproxy/";
 
   private static UserAgent testAgent;
   private static final String testPass = "adamspass";
@@ -96,15 +96,6 @@ public class GitHubProxyServiceTest {
     connector.start(node);
     Thread.sleep(1000); // wait a second for the connector to become ready
     testAgent = MockAgentFactory.getAdam();
-
-    connector.updateServiceList();
-    // avoid timing errors: wait for the repository manager to get all services before continuing
-    try {
-      System.out.println("waiting..");
-      Thread.sleep(1000);
-    } catch (InterruptedException e) {
-      e.printStackTrace();
-    }
   }
 
   /**
