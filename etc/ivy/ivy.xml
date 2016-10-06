@@ -5,8 +5,8 @@
 		<artifact type="jar" ext="jar" conf="default"/>
 	</publications>
 	<dependencies>
-		<dependency org="i5" name="las2peer" rev="0.6-SNAPSHOT" />
-		<dependency org="i5" name="las2peer-web-connector" rev="0.6-SNAPSHOT" />
+		<dependency org="i5" name="las2peer" rev="0.6.0" />
+		<dependency org="i5" name="las2peer-web-connector" rev="0.6.0" />
 		<dependency org="org.eclipse.jgit" name="org.eclipse.jgit" rev="4.0.1.201506240215-r"/>
 		<dependency org="org.apache.commons" name="commons-pool2" rev="2.2"/>
 		<dependency org="org.apache.commons" name="commons-dbcp2" rev="2.0"/>
