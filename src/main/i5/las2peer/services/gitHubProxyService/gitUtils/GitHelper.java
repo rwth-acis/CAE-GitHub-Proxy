@@ -147,7 +147,7 @@ public class GitHelper {
 
     try {
       git = GitHelper.getLocalGit(repositoryName, gitHubOragnization, masterBranchName);
-      git.fetch().call();
+      git.fetch().setCredentialsProvider(cp).call();
 
       MergeCommand mCmd = git.merge();
       Ref HEAD = git.getRepository().getRef("refs/heads/development");
@@ -423,7 +423,6 @@ public class GitHelper {
       throws InvalidRemoteException, TransportException, GitAPIException, FileNotFoundException {
     L2pLogger.logEvent(Event.SERVICE_MESSAGE, "created new local repository " + repositoryName);
     
-    //TODO GitLab
     String repositoryAddress =
         baseURL + gitHubOrganization + "/" + repositoryName + ".git";
     

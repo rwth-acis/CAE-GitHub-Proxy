@@ -82,7 +82,7 @@ public class GitHubProxyServiceTest {
     node.storeAgent(testAgent);
     node.launch();
 
-    testServiceNameVersion = new ServiceNameVersion(gitHubProxyService, "0.1");
+    testServiceNameVersion = new ServiceNameVersion(gitHubProxyService, "0.2");
     testService = ServiceAgent.createServiceAgent(testServiceNameVersion, "a pass");
     testService.unlockPrivateKey("a pass");
 

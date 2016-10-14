@@ -67,7 +67,7 @@ import io.swagger.util.Json;
     contact = @Contact(name = "Thomas Winkler", url = "https://github.com/thwinkler/",
         email = "winkler@dbis.rwth-aachen.de"),
     license = @License(name = "BSD",
-        url = "https://github.com/PedeLa/CAE-Model-Persistence-Service//blob/master/LICENSE.txt")))
+        url = "https://github.com/PedeLa/CAE-Model-Persistence-Service/blob/master/LICENSE.txt")))
 
 public class GitHubProxyService extends RESTService {
 
@@ -227,8 +227,9 @@ public class GitHubProxyService extends RESTService {
   public HashMap<String, JSONObject> getAllTracedFiles(String repositoryName) {
     HashMap<String, JSONObject> files = new HashMap<String, JSONObject>();
 
-    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
+    try (Git git = GitHelper.getLocalGit(repositoryName, this.gitHubOrganization, "development");) {
       JSONArray tracedFiles = (JSONArray) this.getTraceModel(git).get("tracedFiles");
+      logger.fine(gitHubOrganization);
 
       try (TreeWalk treeWalk = GitHelper.getRepositoryTreeWalk(git.getRepository(), true)) {
         while (treeWalk.next()) {
