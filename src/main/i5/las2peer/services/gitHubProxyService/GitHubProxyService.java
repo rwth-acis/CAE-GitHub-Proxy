@@ -28,14 +28,12 @@ import org.json.simple.parser.JSONParser;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
-import i5.las2peer.api.Service;
 import i5.las2peer.logging.L2pLogger;
 import i5.las2peer.logging.NodeObserver.Event;
 import i5.las2peer.restMapper.HttpResponse;
 import i5.las2peer.restMapper.MediaType;
-import i5.las2peer.restMapper.RESTMapper;
+import i5.las2peer.restMapper.RESTService;
 import i5.las2peer.restMapper.annotations.ContentParam;
-import i5.las2peer.restMapper.annotations.Version;
 import i5.las2peer.services.gitHubProxyService.gitUtils.GitHelper;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -60,8 +58,7 @@ import io.swagger.util.Json;
  * 
  */
 
-@Path("CAE/github")
-@Version("0.1")
+@Path("githubproxy/")
 @Api
 @SwaggerDefinition(info = @Info(title = "CAE GitHub Proxy Service", version = "0.1",
     description = "A LAS2peer service used for store and load files of CAE components to and from GitHub. Part of the CAE.",
@@ -69,9 +66,9 @@ import io.swagger.util.Json;
     contact = @Contact(name = "Thomas Winkler", url = "https://github.com/thwinkler/",
         email = "winkler@dbis.rwth-aachen.de"),
     license = @License(name = "BSD",
-        url = "https://github.com/PedeLa/CAE-Model-Persistence-Service//blob/master/LICENSE.txt")))
+        url = "https://github.com/PedeLa/CAE-Model-Persistence-Service/blob/master/LICENSE.txt")))
 
-public class GitHubProxyService extends Service {
+public class GitHubProxyService extends RESTService {
 
   private static final L2pLogger logger = L2pLogger.getInstance(GitHubProxyService.class.getName());
 
@@ -80,9 +77,13 @@ public class GitHubProxyService extends Service {
   private String gitHubOrganization;
   private String gitHubUserMail;
   private boolean useModelCheck;
+  
+  private UsernamePasswordCredentialsProvider cp;
 
   public GitHubProxyService() {
     setFieldValues();
+    cp = new UsernamePasswordCredentialsProvider(gitHubUser, gitHubPassword);
+    GitHelper.cp = cp;
   }
 
   private static String getTraceFileName(String fileName) {
@@ -219,8 +220,9 @@ public class GitHubProxyService extends Service {
   public HashMap<String, JSONObject> getAllTracedFiles(String repositoryName) {
     HashMap<String, JSONObject> files = new HashMap<String, JSONObject>();
 
-    try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development");) {
+    try (Git git = GitHelper.getLocalGit(repositoryName, this.gitHubOrganization, "development");) {
       JSONArray tracedFiles = (JSONArray) this.getTraceModel(git).get("tracedFiles");
+      logger.fine(gitHubOrganization);
 
       try (TreeWalk treeWalk = GitHelper.getRepositoryTreeWalk(git.getRepository(), true)) {
         while (treeWalk.next()) {
@@ -303,13 +305,13 @@ public class GitHubProxyService extends Service {
 
   public String renameFile(String repositoryName, String newFileName, String oldFileName) {
     try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
-      GitHelper.renameFile(repositoryName, gitHubOrganization, newFileName, oldFileName);
+      GitHelper.renameFile(repositoryName, gitHubOrganization, newFileName, oldFileName, cp);
       JSONObject currentTraceFile = this.getFileTraces(git, oldFileName);
 
       // also rename the trace file if it exists
       if (currentTraceFile != null) {
         GitHelper.renameFile(repositoryName, gitHubOrganization, getTraceFileName(newFileName),
-            getTraceFileName(oldFileName));
+            getTraceFileName(oldFileName),cp);
       }
 
       return "done";
@@ -333,12 +335,12 @@ public class GitHubProxyService extends Service {
   public String deleteFile(String repositoryName, String fileName) {
     try (Git git = GitHelper.getLocalGit(repositoryName, gitHubOrganization, "development")) {
 
-      GitHelper.deleteFile(repositoryName, gitHubOrganization, fileName);
+      GitHelper.deleteFile(repositoryName, gitHubOrganization, fileName,cp);
       JSONObject currentTraceFile = this.getFileTraces(git, fileName);
 
       // also rename the trace file if it exists
       if (currentTraceFile != null) {
-        GitHelper.deleteFile(repositoryName, gitHubOrganization, getTraceFileName(fileName));
+        GitHelper.deleteFile(repositoryName, gitHubOrganization, getTraceFileName(fileName),cp);
       }
 
       return "done";
@@ -769,29 +771,6 @@ public class GitHubProxyService extends Service {
     }
     return new HttpResponse("Ok", HttpURLConnection.HTTP_OK);
   }
-
-
-  ////////////////////////////////////////////////////////////////////////////////////////
-  // Methods required by the LAS2peer framework.
-  ////////////////////////////////////////////////////////////////////////////////////////
-
-  /**
-   * 
-   * This method is needed for every RESTful application in LAS2peer.
-   * 
-   * @return the mapping
-   * 
-   */
-  public String getRESTMapping() {
-    String result = "";
-    try {
-      result = RESTMapper.getMethodsAsXML(this.getClass());
-    } catch (Exception e) {
-      logger.printStackTrace(e);
-    }
-    return result;
-  }
-
 
   ////////////////////////////////////////////////////////////////////////////////////////
   // Methods providing a Swagger documentation of the service API.

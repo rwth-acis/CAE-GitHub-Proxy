@@ -45,6 +45,12 @@ public class GitHelper {
 
   private static final L2pLogger logger = L2pLogger.getInstance(GitHubProxyService.class.getName());
 
+  // URLS WERE SWITCHED TO GITLAB FOR THE LAB COURSE
+  // This service will be integrated into the code generation service anyways
+  //private static final String baseURL = "https://github.com/";
+  private static final String baseURL = "http://ginkgo.informatik.rwth-aachen.de:4080/";
+  public static CredentialsProvider cp;
+  
 
   /**
    * Get the path for the given repository name
@@ -69,7 +75,7 @@ public class GitHelper {
    */
 
   public static void renameFile(String repositoryName, String gitHubOrganization,
-      String newFileName, String oldFileName) throws FileNotFoundException, Exception {
+      String newFileName, String oldFileName, CredentialsProvider cp) throws FileNotFoundException, Exception {
     try (Git git = getLocalGit(repositoryName, gitHubOrganization, "development")) {
       File oldFile = new File(getRepositoryPath(repositoryName) + "/" + oldFileName);
       File newFile = new File(getRepositoryPath(repositoryName) + "/" + newFileName);
@@ -110,7 +116,7 @@ public class GitHelper {
    * @throws Exception Thrown if something else went wrong
    */
 
-  public static void deleteFile(String repositoryName, String gitHubOrganization, String fileName)
+  public static void deleteFile(String repositoryName, String gitHubOrganization, String fileName, CredentialsProvider cp)
       throws FileNotFoundException, IOException, Exception {
     try (Git git = getLocalGit(repositoryName, gitHubOrganization, "development")) {
       File file = new File(getRepositoryPath(repositoryName) + "/" + fileName);
@@ -140,7 +146,7 @@ public class GitHelper {
 
     try {
       git = GitHelper.getLocalGit(repositoryName, gitHubOragnization, masterBranchName);
-      git.fetch().call();
+      git.fetch().setCredentialsProvider(cp).call();
 
       MergeCommand mCmd = git.merge();
       Ref HEAD = git.getRepository().getRef("refs/heads/development");
@@ -180,6 +186,8 @@ public class GitHelper {
     LsRemoteCommand lsCmd = new LsRemoteCommand(null);
     lsCmd.setRemote(url);
     lsCmd.setHeads(true);
+    // This is needed for gitlab
+    lsCmd.setCredentialsProvider(cp);
     boolean exists = true;
     try {
       lsCmd.call();
@@ -211,21 +219,24 @@ public class GitHelper {
    * @param repositoryName The name of the repository
    * @param gitHubOrganization The github organization of the repository
    * @return The local repository
-   * @throws Exception
+   * @throws InvalidRemoteException Thrown when an invalid remote is used internally
+   * @throws TransportException Thrown if a protocol error has occurred
+   * @throws GitAPIException Thrown by any git API classes
+   * @throws IOException Thrown if a file system error occured
+   * @throws FileNotFoundException Thrown if the remote repository does not exists
    */
 
   public static Repository getLocalRepository(String repositoryName, String gitHubOrganization)
-      throws Exception {
+      throws FileNotFoundException, IOException, InvalidRemoteException, TransportException,
+      GitAPIException {
     File localPath;
     Repository repository = null;
     localPath = getRepositoryPath(repositoryName);
     File repoFile = new File(localPath + "/.git");
 
     if (!repoFile.exists()) {
-      try {
-        repository = createLocalRepository(repositoryName, gitHubOrganization);
-      } catch (TransportException e) {
-      }
+      repository = createLocalRepository(repositoryName, gitHubOrganization);
+
     } else {
       FileRepositoryBuilder builder = new FileRepositoryBuilder();
       repository = builder.setGitDir(repoFile).readEnvironment().findGitDir().build();
@@ -240,7 +251,7 @@ public class GitHelper {
    * @param repositoryName The name of the repository
    * @param gitHubOrganization The github organization of the repository
    * @return A {@link org.eclipse.jgit.api.Git}
-   * @throws Exception
+   * @throws Exception Thrown if an error occurred while getting the local repository
    */
 
   public static Git getLocalGit(String repositoryName, String gitHubOrganization) throws Exception {
@@ -256,7 +267,7 @@ public class GitHelper {
    * @param gitHubOrganization The github organization of the repository
    * @param branchName The branch name to checkout
    * @return A {@link org.eclipse.jgit.api.Git} checked out to the branch name
-   * @throws Exception
+   * @throws Exception Thrown if an error occurred while getting the local repository
    */
 
   public static Git getLocalGit(String repositoryName, String gitHubOrganization, String branchName)
@@ -272,7 +283,7 @@ public class GitHelper {
    * @param repository The git repository to use
    * @param branchName The branch name to checkout
    * @return A {@link org.eclipse.jgit.api.Git} checked out to the branch name
-   * @throws Exception
+   * @throws Exception Thrown if an error occurred while getting the local repository
    */
 
   public static Git getLocalGit(Repository repository, String branchName) throws Exception {
@@ -288,7 +299,7 @@ public class GitHelper {
    * @return The tree walk of the repository or null if there was an error
    */
 
-  public static TreeWalk getRepositoryTreeWalk(Repository repository) throws Exception {
+  public static TreeWalk getRepositoryTreeWalk(Repository repository) {
     return getRepositoryTreeWalk(repository, false);
   }
 
@@ -300,8 +311,7 @@ public class GitHelper {
    * @return The tree walk of the repository or null if there was an error
    */
 
-  public static TreeWalk getRepositoryTreeWalk(Repository repository, boolean recursive)
-      throws Exception {
+  public static TreeWalk getRepositoryTreeWalk(Repository repository, boolean recursive) {
 
     RevWalk revWalk = null;
     TreeWalk treeWalk = null;
@@ -411,15 +421,17 @@ public class GitHelper {
   private static Repository createLocalRepository(String repositoryName, String gitHubOrganization)
       throws InvalidRemoteException, TransportException, GitAPIException, FileNotFoundException {
     L2pLogger.logEvent(Event.SERVICE_MESSAGE, "created new local repository " + repositoryName);
+    
     String repositoryAddress =
-        "https://github.com/" + gitHubOrganization + "/" + repositoryName + ".git";
+        baseURL + gitHubOrganization + "/" + repositoryName + ".git";
+    
     Repository repository = null;
 
     boolean isFrontend = repositoryName.startsWith("frontendComponent-");
     String masterBranchName = isFrontend ? "gh-pages" : "master";
 
     if (existsRemoteRepository(repositoryAddress)) {
-      try (Git result = Git.cloneRepository().setURI(repositoryAddress)
+      try (Git result = Git.cloneRepository().setURI(repositoryAddress).setCredentialsProvider(cp)
           .setDirectory(getRepositoryPath(repositoryName)).setBranch(masterBranchName).call()) {
         repository = result.getRepository();
       }
