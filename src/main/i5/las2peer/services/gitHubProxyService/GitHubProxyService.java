@@ -19,7 +19,6 @@ import javax.ws.rs.QueryParam;
 
 import org.apache.commons.io.FileUtils;
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.transport.CredentialsProvider;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.PathFilter;
@@ -78,12 +77,6 @@ public class GitHubProxyService extends RESTService {
   private String gitHubOrganization;
   private String gitHubUserMail;
   private boolean useModelCheck;
-  
-  private String usedGitHost;
-  private String baseURL;
-  private String token;
-  private String pushToFs;
-  private String frontentDirectory;
   
   private UsernamePasswordCredentialsProvider cp;
 
